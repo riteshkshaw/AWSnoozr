@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { fetchAuthSession } from '@aws-amplify/auth';
+import { fetchAuthSession } from 'aws-amplify/auth';
 
 const API_BASE_URL = process.env.REACT_APP_API_GATEWAY_URL;
 
