@@ -203,7 +203,7 @@ const AccountReport = () => {
                   <td>
                     <button
                       className="button button-sm button-outline"
-                      onClick={() => navigate(row.route)}
+                      onClick={() => navigate(row.route + (selectedAccountId ? `?accountId=${selectedAccountId}` : ''))}
                     >
                       Manage
                     </button>

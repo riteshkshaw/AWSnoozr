@@ -1,8 +1,28 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
 import './EC2List.css';
 
+function transformAggregatedEKS(resources) {
+  const byRegion = {};
+  resources.forEach(r => {
+    if (!byRegion[r.region]) byRegion[r.region] = { region: r.region, totalCount: 0, clusters: [] };
+    byRegion[r.region].totalCount++;
+    byRegion[r.region].clusters.push({
+      name: r.resourceId,
+      version: r.version || '-',
+      status: r.state,
+      nodegroups: [],
+      totalNodes: r.nodeGroupCount || 0,
+      costIndicator: r.state === 'ACTIVE' ? 'active-cost' : 'no-cost'
+    });
+  });
+  return Object.values(byRegion);
+}
+
 const EKSList = () => {
+  const [searchParams] = useSearchParams();
+  const accountId = searchParams.get('accountId');
   const [data, setData] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
@@ -12,15 +32,20 @@ const EKSList = () => {
 
   useEffect(() => {
     fetchEKSClusters();
-  }, []);
+  }, [accountId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchEKSClusters = async () => {
     setIsLoading(true);
     setError('');
 
     try {
-      const response = await api.listEKS();
-      setData(response.data.data);
+      if (accountId) {
+        const aggData = await api.aggregateResources('eks', accountId);
+        setData(transformAggregatedEKS(aggData.resources || []));
+      } else {
+        const response = await api.listEKS();
+        setData(response.data.data);
+      }
     } catch (err) {
       setError('Failed to load EKS clusters');
       console.error('EKS list error:', err);
@@ -45,7 +70,7 @@ const EKSList = () => {
       `Enter desired size (or 0 to shut down):`
     );
 
-    if (desiredSize === null) return; // User cancelled
+    if (desiredSize === null) return;
 
     const newSize = parseInt(desiredSize, 10);
     if (isNaN(newSize) || newSize < minSize || newSize > maxSize) {
@@ -72,118 +97,121 @@ const EKSList = () => {
     return <div className="loading">Loading EKS clusters...</div>;
   }
 
-  const totalClusters = data.reduce((sum, region) => sum + region.totalCount, 0);
+  const activeRegions = data.filter(r => r.totalCount > 0);
+  const totalClusters = activeRegions.reduce((sum, r) => sum + r.totalCount, 0);
 
   return (
     <div className="ec2-list">
       <div className="page-header">
         <h1>EKS Clusters</h1>
-        <p>Total: {totalClusters} clusters across {data.length} regions</p>
+        <p>Total: {totalClusters} clusters across {activeRegions.length} regions</p>
       </div>
+
+      {accountId && (
+        <div className="account-filter-banner">
+          Filtered to account: <strong>{accountId}</strong>
+        </div>
+      )}
 
       {error && <div className="error-message">{error}</div>}
       {successMessage && <div className="success-message">{successMessage}</div>}
 
-      {data.map((regionData) => (
+      {activeRegions.map((regionData) => (
         <div key={regionData.region} className="region-section">
           <h2 className="region-title">
             {regionData.region} ({regionData.totalCount} clusters)
           </h2>
 
-          {regionData.totalCount === 0 ? (
-            <p className="no-resources">No EKS clusters in this region</p>
-          ) : (
-            <div className="card">
-              <table className="resource-table">
-                <thead>
-                  <tr>
-                    <th>Cluster Name</th>
-                    <th>Version</th>
-                    <th>Status</th>
-                    <th>Node Groups</th>
-                    <th>Total Nodes</th>
-                    <th>Cost Indicator</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {regionData.clusters.map((cluster) => (
-                    <React.Fragment key={cluster.name}>
-                      <tr>
-                        <td className="instance-id">{cluster.name}</td>
-                        <td>{cluster.version}</td>
+          <div className="card">
+            <table className="resource-table">
+              <thead>
+                <tr>
+                  <th>Cluster Name</th>
+                  <th>Version</th>
+                  <th>Status</th>
+                  <th>Node Groups</th>
+                  <th>Total Nodes</th>
+                  <th>Cost Indicator</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {regionData.clusters.map((cluster) => (
+                  <React.Fragment key={cluster.name}>
+                    <tr>
+                      <td className="instance-id">{cluster.name}</td>
+                      <td>{cluster.version}</td>
+                      <td>
+                        <span className={`state-badge ${cluster.status.toLowerCase()}`}>
+                          {cluster.status}
+                        </span>
+                      </td>
+                      <td>{cluster.nodegroups.length}</td>
+                      <td>{cluster.totalNodes}</td>
+                      <td>
+                        <span className={`cost-indicator ${cluster.costIndicator}`}>
+                          {cluster.costIndicator.replace('-', ' ')}
+                        </span>
+                      </td>
+                      <td>
+                        {cluster.nodegroups.length > 0 && (
+                          <button
+                            onClick={() => toggleCluster(cluster.name)}
+                            className="button button-primary button-sm"
+                          >
+                            {expandedClusters[cluster.name] ? 'Hide' : 'Show'} Node Groups
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                    {expandedClusters[cluster.name] && cluster.nodegroups.map((ng) => (
+                      <tr key={`${cluster.name}-${ng.name}`} style={{ backgroundColor: '#f9f9f9' }}>
+                        <td colSpan="1" style={{ paddingLeft: '40px', fontSize: '13px' }}>
+                          ↳ {ng.name}
+                        </td>
+                        <td style={{ fontSize: '12px' }}>
+                          {ng.instanceTypes?.join(', ') || '-'}
+                        </td>
                         <td>
-                          <span className={`state-badge ${cluster.status.toLowerCase()}`}>
-                            {cluster.status}
+                          <span className={`state-badge ${ng.status.toLowerCase()}`}>
+                            {ng.status}
                           </span>
                         </td>
-                        <td>{cluster.nodegroups.length}</td>
-                        <td>{cluster.totalNodes}</td>
-                        <td>
-                          <span className={`cost-indicator ${cluster.costIndicator}`}>
-                            {cluster.costIndicator.replace('-', ' ')}
-                          </span>
+                        <td style={{ fontSize: '12px' }}>
+                          Desired: {ng.desiredSize}<br/>
+                          Min: {ng.minSize} / Max: {ng.maxSize}
                         </td>
+                        <td>{ng.desiredSize} nodes</td>
                         <td>
-                          {cluster.nodegroups.length > 0 && (
-                            <button
-                              onClick={() => toggleCluster(cluster.name)}
-                              className="button button-primary button-sm"
-                            >
-                              {expandedClusters[cluster.name] ? 'Hide' : 'Show'} Node Groups
-                            </button>
+                          {ng.desiredSize === 0 ? (
+                            <span className="cost-indicator no-cost">scaled to zero</span>
+                          ) : (
+                            <span className="cost-indicator active-cost">active cost</span>
                           )}
                         </td>
-                      </tr>
-                      {expandedClusters[cluster.name] && cluster.nodegroups.map((ng) => (
-                        <tr key={`${cluster.name}-${ng.name}`} style={{ backgroundColor: '#f9f9f9' }}>
-                          <td colSpan="1" style={{ paddingLeft: '40px', fontSize: '13px' }}>
-                            ↳ {ng.name}
-                          </td>
-                          <td style={{ fontSize: '12px' }}>
-                            {ng.instanceTypes?.join(', ') || '-'}
-                          </td>
-                          <td>
-                            <span className={`state-badge ${ng.status.toLowerCase()}`}>
-                              {ng.status}
-                            </span>
-                          </td>
-                          <td style={{ fontSize: '12px' }}>
-                            Desired: {ng.desiredSize}<br/>
-                            Min: {ng.minSize} / Max: {ng.maxSize}
-                          </td>
-                          <td>{ng.desiredSize} nodes</td>
-                          <td>
-                            {ng.desiredSize === 0 ? (
-                              <span className="cost-indicator no-cost">scaled to zero</span>
-                            ) : (
-                              <span className="cost-indicator active-cost">active cost</span>
+                        <td>
+                          <button
+                            onClick={() => handleScaleNodeGroup(
+                              cluster.name,
+                              ng.name,
+                              ng.desiredSize,
+                              ng.minSize,
+                              ng.maxSize,
+                              regionData.region
                             )}
-                          </td>
-                          <td>
-                            <button
-                              onClick={() => handleScaleNodeGroup(
-                                cluster.name,
-                                ng.name,
-                                ng.desiredSize,
-                                ng.minSize,
-                                ng.maxSize,
-                                regionData.region
-                              )}
-                              disabled={actionLoading[`${cluster.name}-${ng.name}`]}
-                              className="button button-primary button-sm"
-                            >
-                              {actionLoading[`${cluster.name}-${ng.name}`] ? 'Scaling...' : 'Scale'}
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </React.Fragment>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                            disabled={actionLoading[`${cluster.name}-${ng.name}`]}
+                            className="button button-primary button-sm"
+                          >
+                            {actionLoading[`${cluster.name}-${ng.name}`] ? 'Scaling...' : 'Scale'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       ))}
 

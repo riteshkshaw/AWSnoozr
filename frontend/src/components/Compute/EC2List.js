@@ -1,9 +1,30 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
 import ScheduleModal from '../Schedules/ScheduleModal';
 import './EC2List.css';
 
+function transformAggregatedEC2(resources) {
+  const byRegion = {};
+  resources.forEach(r => {
+    if (!byRegion[r.region]) byRegion[r.region] = { region: r.region, count: 0, instances: [] };
+    byRegion[r.region].count++;
+    byRegion[r.region].instances.push({
+      id: r.resourceId,
+      type: r.instanceType || '-',
+      state: r.state,
+      costIndicator: r.state === 'running' ? 'active-cost' : 'no-cost',
+      availabilityZone: '-',
+      privateIp: '-',
+      publicIp: '-'
+    });
+  });
+  return Object.values(byRegion);
+}
+
 const EC2List = () => {
+  const [searchParams] = useSearchParams();
+  const accountId = searchParams.get('accountId');
   const [data, setData] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
@@ -14,15 +35,20 @@ const EC2List = () => {
 
   useEffect(() => {
     fetchEC2Instances();
-  }, []);
+  }, [accountId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchEC2Instances = async () => {
     setIsLoading(true);
     setError('');
 
     try {
-      const response = await api.listEC2();
-      setData(response.data.data);
+      if (accountId) {
+        const aggData = await api.aggregateResources('ec2', accountId);
+        setData(transformAggregatedEC2(aggData.resources || []));
+      } else {
+        const response = await api.listEC2();
+        setData(response.data.data);
+      }
     } catch (err) {
       setError('Failed to load EC2 instances');
       console.error('EC2 list error:', err);
@@ -86,98 +112,101 @@ const EC2List = () => {
     return <div className="loading">Loading EC2 instances...</div>;
   }
 
-  const totalInstances = data.reduce((sum, region) => sum + region.count, 0);
+  const activeRegions = data.filter(r => r.count > 0);
+  const totalInstances = activeRegions.reduce((sum, r) => sum + r.count, 0);
 
   return (
     <div className="ec2-list">
       <div className="page-header">
         <h1>EC2 Instances</h1>
-        <p>Total: {totalInstances} instances across {data.length} regions</p>
+        <p>Total: {totalInstances} instances across {activeRegions.length} regions</p>
       </div>
+
+      {accountId && (
+        <div className="account-filter-banner">
+          Filtered to account: <strong>{accountId}</strong>
+        </div>
+      )}
 
       {error && <div className="error-message">{error}</div>}
       {successMessage && <div className="success-message">{successMessage}</div>}
 
-      {data.map((regionData) => (
+      {activeRegions.map((regionData) => (
         <div key={regionData.region} className="region-section">
           <h2 className="region-title">
             {regionData.region} ({regionData.count} instances)
           </h2>
 
-          {regionData.count === 0 ? (
-            <p className="no-resources">No EC2 instances in this region</p>
-          ) : (
-            <div className="card">
-              <table className="resource-table">
-                <thead>
-                  <tr>
-                    <th>Instance ID</th>
-                    <th>Type</th>
-                    <th>State</th>
-                    <th>Cost Indicator</th>
-                    <th>Availability Zone</th>
-                    <th>Private IP</th>
-                    <th>Public IP</th>
-                    <th>Actions</th>
+          <div className="card">
+            <table className="resource-table">
+              <thead>
+                <tr>
+                  <th>Instance ID</th>
+                  <th>Type</th>
+                  <th>State</th>
+                  <th>Cost Indicator</th>
+                  <th>Availability Zone</th>
+                  <th>Private IP</th>
+                  <th>Public IP</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {regionData.instances.map((instance) => (
+                  <tr key={instance.id}>
+                    <td className="instance-id">{instance.id}</td>
+                    <td>{instance.type}</td>
+                    <td>
+                      <span className={`state-badge ${instance.state}`}>
+                        {instance.state}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={`cost-indicator ${instance.costIndicator}`}>
+                        {instance.costIndicator.replace('-', ' ')}
+                      </span>
+                    </td>
+                    <td>{instance.availabilityZone}</td>
+                    <td>{instance.privateIp || '-'}</td>
+                    <td>{instance.publicIp || '-'}</td>
+                    <td>
+                      <div className="action-buttons">
+                        {instance.state === 'running' && (
+                          <button
+                            onClick={() => handleAction(instance.id, 'stop', regionData.region)}
+                            disabled={actionLoading[`${instance.id}-stop`]}
+                            className="button button-danger button-sm"
+                          >
+                            {actionLoading[`${instance.id}-stop`] ? 'Stopping...' : 'Stop'}
+                          </button>
+                        )}
+                        {instance.state === 'stopped' && (
+                          <button
+                            onClick={() => handleAction(instance.id, 'start', regionData.region)}
+                            disabled={actionLoading[`${instance.id}-start`]}
+                            className="button button-success button-sm"
+                          >
+                            {actionLoading[`${instance.id}-start`] ? 'Starting...' : 'Start'}
+                          </button>
+                        )}
+                        {['running', 'stopped'].includes(instance.state) && (
+                          <button
+                            onClick={() => handleSchedule(instance, regionData.region)}
+                            className="button button-primary button-sm"
+                          >
+                            Schedule
+                          </button>
+                        )}
+                        {!['running', 'stopped'].includes(instance.state) && (
+                          <span className="state-note">{instance.state}</span>
+                        )}
+                      </div>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {regionData.instances.map((instance) => (
-                    <tr key={instance.id}>
-                      <td className="instance-id">{instance.id}</td>
-                      <td>{instance.type}</td>
-                      <td>
-                        <span className={`state-badge ${instance.state}`}>
-                          {instance.state}
-                        </span>
-                      </td>
-                      <td>
-                        <span className={`cost-indicator ${instance.costIndicator}`}>
-                          {instance.costIndicator.replace('-', ' ')}
-                        </span>
-                      </td>
-                      <td>{instance.availabilityZone}</td>
-                      <td>{instance.privateIp || '-'}</td>
-                      <td>{instance.publicIp || '-'}</td>
-                      <td>
-                        <div className="action-buttons">
-                          {instance.state === 'running' && (
-                            <button
-                              onClick={() => handleAction(instance.id, 'stop', regionData.region)}
-                              disabled={actionLoading[`${instance.id}-stop`]}
-                              className="button button-danger button-sm"
-                            >
-                              {actionLoading[`${instance.id}-stop`] ? 'Stopping...' : 'Stop'}
-                            </button>
-                          )}
-                          {instance.state === 'stopped' && (
-                            <button
-                              onClick={() => handleAction(instance.id, 'start', regionData.region)}
-                              disabled={actionLoading[`${instance.id}-start`]}
-                              className="button button-success button-sm"
-                            >
-                              {actionLoading[`${instance.id}-start`] ? 'Starting...' : 'Start'}
-                            </button>
-                          )}
-                          {['running', 'stopped'].includes(instance.state) && (
-                            <button
-                              onClick={() => handleSchedule(instance, regionData.region)}
-                              className="button button-primary button-sm"
-                            >
-                              Schedule
-                            </button>
-                          )}
-                          {!['running', 'stopped'].includes(instance.state) && (
-                            <span className="state-note">{instance.state}</span>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       ))}
 
