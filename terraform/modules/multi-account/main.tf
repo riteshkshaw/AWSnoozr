@@ -60,8 +60,14 @@ resource "aws_iam_role_policy" "control_actions" {
           # Redshift control
           "redshift:PauseCluster",
           "redshift:ResumeCluster",
-          # EKS control
+          # EKS control and read
           "eks:UpdateNodegroupConfig",
+          "eks:ListFargateProfiles",
+          "eks:DescribeFargateProfile",
+          "eks:ListClusters",
+          "eks:DescribeCluster",
+          "eks:ListNodegroups",
+          "eks:DescribeNodegroup",
           # Auto Scaling
           "autoscaling:UpdateAutoScalingGroup",
           "autoscaling:SetDesiredCapacity",
