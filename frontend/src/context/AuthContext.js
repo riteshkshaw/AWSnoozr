@@ -1,5 +1,5 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
-import { signIn as amplifySignIn, signOut as amplifySignOut, getCurrentUser, fetchAuthSession } from '@aws-amplify/auth';
+import { signIn as amplifySignIn, signOut as amplifySignOut, getCurrentUser, fetchAuthSession } from 'aws-amplify/auth';
 
 const AuthContext = createContext({
   user: null,
