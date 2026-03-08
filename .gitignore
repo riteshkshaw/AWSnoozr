@@ -32,4 +32,4 @@ Thumbs.db
 *.log
 npm-debug.log*
 
-*.md
+*.mdfrontend/.env.production
