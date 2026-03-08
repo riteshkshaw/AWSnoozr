@@ -10,7 +10,7 @@ const { STSClient, AssumeRoleCommand } = require('@aws-sdk/client-sts');
 const { EC2Client, DescribeInstancesCommand, DescribeRegionsCommand, DescribeNatGatewaysCommand, DescribeVolumesCommand, DescribeAddressesCommand } = require('@aws-sdk/client-ec2');
 const { RDSClient, DescribeDBInstancesCommand, DescribeDBClustersCommand } = require('@aws-sdk/client-rds');
 const { RedshiftClient, DescribeClustersCommand } = require('@aws-sdk/client-redshift');
-const { EKSClient, ListClustersCommand, DescribeClusterCommand, ListNodegroupsCommand } = require('@aws-sdk/client-eks');
+const { EKSClient, ListClustersCommand, DescribeClusterCommand, ListNodegroupsCommand, DescribeNodegroupCommand } = require('@aws-sdk/client-eks');
 const { ElasticLoadBalancingV2Client, DescribeLoadBalancersCommand } = require('@aws-sdk/client-elastic-load-balancing-v2');
 const { unmarshall } = require('@aws-sdk/util-dynamodb');
 
@@ -446,6 +446,24 @@ async function queryEKS(region, credentials, accountId) {
         new ListNodegroupsCommand({ clusterName })
       );
 
+      const nodeGroupDetails = await Promise.all(
+        nodegroups.map(async (nodegroupName) => {
+          const { nodegroup } = await eks.send(
+            new DescribeNodegroupCommand({ clusterName, nodegroupName })
+          );
+          return {
+            name: nodegroupName,
+            status: nodegroup.status,
+            desiredSize: nodegroup.scalingConfig?.desiredSize ?? 0,
+            minSize: nodegroup.scalingConfig?.minSize ?? 0,
+            maxSize: nodegroup.scalingConfig?.maxSize ?? 0,
+            instanceTypes: nodegroup.instanceTypes || []
+          };
+        })
+      );
+
+      const totalNodes = nodeGroupDetails.reduce((sum, ng) => sum + ng.desiredSize, 0);
+
       results.push({
         accountId,
         region,
@@ -454,7 +472,9 @@ async function queryEKS(region, credentials, accountId) {
         name: clusterName,
         state: cluster.status,
         version: cluster.version,
-        nodeGroupCount: nodegroups.length
+        nodeGroupCount: nodeGroupDetails.length,
+        nodeGroups: nodeGroupDetails,
+        totalNodes
       });
     }
 

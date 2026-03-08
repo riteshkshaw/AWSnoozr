@@ -13,8 +13,8 @@ function transformAggregatedEKS(resources) {
       accountId: r.accountId,
       version: r.version || '-',
       status: r.state,
-      nodegroups: [],
-      totalNodes: r.nodeGroupCount || 0,
+      nodegroups: r.nodeGroups || [],
+      totalNodes: r.totalNodes ?? 0,
       costIndicator: r.state === 'ACTIVE' ? 'active-cost' : 'no-cost'
     });
   });
