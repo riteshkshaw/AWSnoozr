@@ -1,0 +1,21 @@
+# Copy this file to terraform.tfvars and fill in your values
+
+project_name = "awsnoozr"
+environment  = "prod"
+
+# AWS regions to monitor (add more as needed)
+aws_regions = ["us-east-1", "us-west-2", "eu-west-1"]
+
+# GitHub repository for Amplify hosting
+github_repo = "https://github.com/your-org/awsnoozr-app"
+
+# GitHub personal access token (with repo permissions)
+# Create at: https://github.com/settings/tokens
+github_token = "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# Admin email for SNS notifications
+admin_email = "admin@example.com"
+
+# Main AWS account ID (for cross-account access)
+# Get with: aws sts get-caller-identity --query Account --output text
+main_account_id = "123456789012"
