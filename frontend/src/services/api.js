@@ -58,6 +58,14 @@ const api = {
       `/compute/eks/${cluster}/nodegroup/${nodegroupName}/scale?region=${region}&accountId=${accountId}`,
       { desiredSize }
     ),
+  listEKSWorkloads: (clusterName, region, accountId) =>
+    apiClient.get(`/compute/eks/${clusterName}/workloads?region=${region}&accountId=${accountId}`)
+      .then(res => res.data),
+  scaleEKSDeployment: (clusterName, namespace, deployment, replicas, region, accountId) =>
+    apiClient.post(
+      `/compute/eks/${clusterName}/scale-deployment?region=${region}&accountId=${accountId}`,
+      { namespace, deployment, replicas }
+    ).then(res => res.data),
 
   // Databases - Read
   listRDS: () => apiClient.get('/databases/rds'),

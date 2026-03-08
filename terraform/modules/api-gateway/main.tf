@@ -422,19 +422,38 @@ resource "aws_api_gateway_resource" "eks_scale" {
   path_part   = "scale"
 }
 
+# /compute/eks/{clusterName}/workloads
+resource "aws_api_gateway_resource" "eks_workloads" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.eks_cluster_name.id
+  path_part   = "workloads"
+}
+
+# /compute/eks/{clusterName}/scale-deployment
+resource "aws_api_gateway_resource" "eks_scale_deployment" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.eks_cluster_name.id
+  path_part   = "scale-deployment"
+}
+
 # ============================================================
 # Control action endpoints — POST + OPTIONS for each
 # ============================================================
 
 locals {
   control_actions = {
-    "ec2_stop"       = { resource_id = aws_api_gateway_resource.ec2_stop.id,       lambda = "control-ec2" }
-    "ec2_start"      = { resource_id = aws_api_gateway_resource.ec2_start.id,      lambda = "control-ec2" }
-    "rds_stop"       = { resource_id = aws_api_gateway_resource.rds_stop.id,       lambda = "control-rds" }
-    "rds_start"      = { resource_id = aws_api_gateway_resource.rds_start.id,      lambda = "control-rds" }
-    "redshift_pause" = { resource_id = aws_api_gateway_resource.redshift_pause.id, lambda = "control-redshift" }
-    "redshift_resume"= { resource_id = aws_api_gateway_resource.redshift_resume.id,lambda = "control-redshift" }
-    "eks_scale"      = { resource_id = aws_api_gateway_resource.eks_scale.id,      lambda = "control-eks-nodegroup" }
+    "ec2_stop"            = { resource_id = aws_api_gateway_resource.ec2_stop.id,            lambda = "control-ec2" }
+    "ec2_start"           = { resource_id = aws_api_gateway_resource.ec2_start.id,           lambda = "control-ec2" }
+    "rds_stop"            = { resource_id = aws_api_gateway_resource.rds_stop.id,            lambda = "control-rds" }
+    "rds_start"           = { resource_id = aws_api_gateway_resource.rds_start.id,           lambda = "control-rds" }
+    "redshift_pause"      = { resource_id = aws_api_gateway_resource.redshift_pause.id,      lambda = "control-redshift" }
+    "redshift_resume"     = { resource_id = aws_api_gateway_resource.redshift_resume.id,     lambda = "control-redshift" }
+    "eks_scale"           = { resource_id = aws_api_gateway_resource.eks_scale.id,           lambda = "control-eks-nodegroup" }
+    "eks_scale_deployment"= { resource_id = aws_api_gateway_resource.eks_scale_deployment.id,lambda = "control-eks-workload" }
+  }
+
+  workload_get_actions = {
+    "eks_workloads" = { resource_id = aws_api_gateway_resource.eks_workloads.id, lambda = "list-eks-workloads" }
   }
 }
 
@@ -523,11 +542,86 @@ resource "aws_api_gateway_integration_response" "control_options" {
   depends_on = [aws_api_gateway_integration.control_options]
 }
 
+# GET method for workload listing
+resource "aws_api_gateway_method" "workload_get" {
+  for_each = local.workload_get_actions
+
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  resource_id   = each.value.resource_id
+  http_method   = "GET"
+  authorization = "COGNITO_USER_POOLS"
+  authorizer_id = aws_api_gateway_authorizer.cognito.id
+}
+
+resource "aws_api_gateway_integration" "workload_get" {
+  for_each = local.workload_get_actions
+
+  rest_api_id             = aws_api_gateway_rest_api.main.id
+  resource_id             = each.value.resource_id
+  http_method             = aws_api_gateway_method.workload_get[each.key].http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = var.lambda_function_invoke_arns[each.value.lambda]
+}
+
+resource "aws_api_gateway_method" "workload_get_options" {
+  for_each = local.workload_get_actions
+
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  resource_id   = each.value.resource_id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "workload_get_options" {
+  for_each = local.workload_get_actions
+
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = each.value.resource_id
+  http_method = aws_api_gateway_method.workload_get_options[each.key].http_method
+  type        = "MOCK"
+  request_templates = { "application/json" = "{\"statusCode\": 200}" }
+}
+
+resource "aws_api_gateway_method_response" "workload_get_options" {
+  for_each = local.workload_get_actions
+
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = each.value.resource_id
+  http_method = aws_api_gateway_method.workload_get_options[each.key].http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+    "method.response.header.Access-Control-Allow-Origin"  = true
+  }
+
+  response_models = { "application/json" = "Empty" }
+}
+
+resource "aws_api_gateway_integration_response" "workload_get_options" {
+  for_each = local.workload_get_actions
+
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = each.value.resource_id
+  http_method = aws_api_gateway_method.workload_get_options[each.key].http_method
+  status_code = aws_api_gateway_method_response.workload_get_options[each.key].status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+    "method.response.header.Access-Control-Allow-Methods" = "'GET,OPTIONS'"
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+  }
+
+  depends_on = [aws_api_gateway_integration.workload_get_options]
+}
+
 # Lambda invoke permissions for control functions
 # Uses a distinct statement_id prefix "AllowControlInvoke-" to avoid collisions
 # with the "AllowAPIGatewayInvoke-" prefix used for get_methods above.
 resource "aws_lambda_permission" "control_invoke" {
-  for_each = toset(["control-ec2", "control-rds", "control-redshift", "control-eks-nodegroup"])
+  for_each = toset(["control-ec2", "control-rds", "control-redshift", "control-eks-nodegroup", "control-eks-workload", "list-eks-workloads"])
 
   statement_id  = "AllowControlInvoke-${each.key}"
   action        = "lambda:InvokeFunction"
@@ -594,6 +688,10 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_integration.control_post,
       aws_api_gateway_method.control_options,
       aws_api_gateway_integration.control_options,
+      aws_api_gateway_method.workload_get,
+      aws_api_gateway_integration.workload_get,
+      aws_api_gateway_method.workload_get_options,
+      aws_api_gateway_integration.workload_get_options,
     ]))
   }
 

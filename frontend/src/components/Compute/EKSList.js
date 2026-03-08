@@ -30,6 +30,8 @@ const EKSList = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [expandedClusters, setExpandedClusters] = useState({});
+  const [workloads, setWorkloads] = useState({});       // clusterName → { namespaces }
+  const [workloadsLoading, setWorkloadsLoading] = useState({});
   const [actionLoading, setActionLoading] = useState({});
   const [successMessage, setSuccessMessage] = useState('');
 
@@ -57,11 +59,50 @@ const EKSList = () => {
     }
   };
 
-  const toggleCluster = (clusterName) => {
-    setExpandedClusters({
-      ...expandedClusters,
-      [clusterName]: !expandedClusters[clusterName]
-    });
+  const toggleCluster = async (clusterName, cluster, region) => {
+    const nowExpanded = !expandedClusters[clusterName];
+    setExpandedClusters({ ...expandedClusters, [clusterName]: nowExpanded });
+
+    // Fetch workloads on first expand for Fargate clusters
+    if (nowExpanded && cluster.computeType === 'fargate' && !workloads[clusterName]) {
+      setWorkloadsLoading(prev => ({ ...prev, [clusterName]: true }));
+      try {
+        const data = await api.listEKSWorkloads(clusterName, region, cluster.accountId || accountId);
+        setWorkloads(prev => ({ ...prev, [clusterName]: data.namespaces || {} }));
+      } catch (err) {
+        setError(`Failed to load workloads for ${clusterName}: ${err.message}`);
+      } finally {
+        setWorkloadsLoading(prev => ({ ...prev, [clusterName]: false }));
+      }
+    }
+  };
+
+  const handleScaleDeployment = async (clusterName, namespace, deployment, replicas, region, clusterAccountId) => {
+    const key = `${clusterName}-${namespace}-${deployment}`;
+    const effectiveAccountId = clusterAccountId || accountId;
+
+    if (!window.confirm(
+      replicas === 0
+        ? `Scale DOWN ${namespace}/${deployment} to 0 replicas? This stops all pods.`
+        : `Scale UP ${namespace}/${deployment} to ${replicas} replicas?`
+    )) return;
+
+    setActionLoading(prev => ({ ...prev, [key]: true }));
+    setError('');
+    try {
+      await api.scaleEKSDeployment(clusterName, namespace, deployment, replicas, region, effectiveAccountId);
+      setSuccessMessage(`${namespace}/${deployment} scaled to ${replicas} replicas`);
+      // Refresh workloads
+      setWorkloads(prev => ({ ...prev, [clusterName]: undefined }));
+      setTimeout(async () => {
+        const refreshed = await api.listEKSWorkloads(clusterName, region, effectiveAccountId);
+        setWorkloads(prev => ({ ...prev, [clusterName]: refreshed.namespaces || {} }));
+      }, 2000);
+    } catch (err) {
+      setError(err.response?.data?.error || `Failed to scale ${deployment}`);
+    } finally {
+      setActionLoading(prev => ({ ...prev, [key]: false }));
+    }
   };
 
   const handleScaleNodeGroup = async (clusterName, nodegroupName, currentSize, minSize, maxSize, region, resourceAccountId) => {
@@ -185,17 +226,18 @@ const EKSList = () => {
                         </span>
                       </td>
                       <td>
-                        {cluster.computeType === 'fargate' && cluster.fargateProfiles.length > 0 && (
+                        {cluster.computeType === 'fargate' && (
                           <button
-                            onClick={() => toggleCluster(cluster.name)}
+                            onClick={() => toggleCluster(cluster.name, cluster, regionData.region)}
                             className="button button-primary button-sm"
                           >
-                            {expandedClusters[cluster.name] ? 'Hide' : 'Show'} Profiles
+                            {workloadsLoading[cluster.name] ? 'Loading...' :
+                              expandedClusters[cluster.name] ? 'Hide Workloads' : 'Show Workloads'}
                           </button>
                         )}
                         {cluster.computeType !== 'fargate' && cluster.nodegroups.length > 0 && (
                           <button
-                            onClick={() => toggleCluster(cluster.name)}
+                            onClick={() => toggleCluster(cluster.name, cluster, regionData.region)}
                             className="button button-primary button-sm"
                           >
                             {expandedClusters[cluster.name] ? 'Hide' : 'Show'} Node Groups
@@ -203,25 +245,91 @@ const EKSList = () => {
                         )}
                       </td>
                     </tr>
-                    {expandedClusters[cluster.name] && cluster.computeType === 'fargate' && cluster.fargateProfiles.map((fp) => (
-                      <tr key={`${cluster.name}-fp-${fp.name}`} style={{ backgroundColor: '#f9f9f9' }}>
-                        <td colSpan="2" style={{ paddingLeft: '40px', fontSize: '13px' }}>
-                          ↳ {fp.name}
-                        </td>
-                        <td>
-                          <span className={`state-badge ${fp.status?.toLowerCase()}`}>
-                            {fp.status}
-                          </span>
-                        </td>
-                        <td colSpan="2" style={{ fontSize: '12px', color: '#666' }}>
-                          {fp.selectors?.map((s, i) => (
-                            <span key={i}>ns: {s.namespace}{s.labels ? ` (${Object.entries(s.labels).map(([k,v]) => `${k}=${v}`).join(', ')})` : ''} </span>
+                    {expandedClusters[cluster.name] && cluster.computeType === 'fargate' && (() => {
+                      const nsData = workloads[cluster.name];
+                      if (workloadsLoading[cluster.name] || !nsData) {
+                        return (
+                          <tr><td colSpan="8" style={{ textAlign: 'center', padding: '16px', color: '#999' }}>
+                            {workloadsLoading[cluster.name] ? 'Loading workloads...' : 'No workload data yet.'}
+                          </td></tr>
+                        );
+                      }
+                      return Object.entries(nsData).map(([ns, nsInfo]) => (
+                        <React.Fragment key={`${cluster.name}-ns-${ns}`}>
+                          {/* Namespace header row */}
+                          <tr style={{ backgroundColor: '#f0f4ff' }}>
+                            <td colSpan="3" style={{ paddingLeft: '32px', fontWeight: 700, fontSize: '13px', color: '#444' }}>
+                              📁 {ns}
+                            </td>
+                            <td colSpan="2" style={{ fontSize: '12px', color: '#666' }}>
+                              {nsInfo.deployments.length} deployments · {nsInfo.pods.length} pods
+                            </td>
+                            <td colSpan="3">
+                              {nsInfo.deployments.some(d => d.replicas > 0) && (
+                                <button
+                                  className="button button-danger button-sm"
+                                  onClick={() => {
+                                    nsInfo.deployments.filter(d => d.replicas > 0).forEach(d =>
+                                      handleScaleDeployment(cluster.name, ns, d.name, 0, regionData.region, cluster.accountId)
+                                    );
+                                  }}
+                                >
+                                  Scale All to 0
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                          {/* Deployment rows */}
+                          {nsInfo.deployments.map(dep => (
+                            <tr key={`${cluster.name}-${ns}-${dep.name}`} style={{ backgroundColor: '#fafbff' }}>
+                              <td colSpan="2" style={{ paddingLeft: '52px', fontSize: '13px' }}>
+                                ↳ {dep.name}
+                              </td>
+                              <td>
+                                <span className={`state-badge ${dep.availableReplicas > 0 ? 'active' : 'stopped'}`}>
+                                  {dep.readyReplicas}/{dep.replicas} ready
+                                </span>
+                              </td>
+                              <td style={{ fontSize: '12px', color: '#666' }}>
+                                {dep.image?.split('/').pop() || '-'}
+                              </td>
+                              <td>
+                                {dep.replicas > 0
+                                  ? <span className="cost-indicator active-cost">active cost</span>
+                                  : <span className="cost-indicator no-cost">scaled to 0</span>
+                                }
+                              </td>
+                              <td colSpan="3">
+                                <div className="action-buttons">
+                                  {dep.replicas > 0 ? (
+                                    <button
+                                      className="button button-danger button-sm"
+                                      disabled={actionLoading[`${cluster.name}-${ns}-${dep.name}`]}
+                                      onClick={() => handleScaleDeployment(cluster.name, ns, dep.name, 0, regionData.region, cluster.accountId)}
+                                    >
+                                      {actionLoading[`${cluster.name}-${ns}-${dep.name}`] ? 'Scaling...' : 'Scale to 0'}
+                                    </button>
+                                  ) : (
+                                    <button
+                                      className="button button-success button-sm"
+                                      disabled={actionLoading[`${cluster.name}-${ns}-${dep.name}`]}
+                                      onClick={() => {
+                                        const n = prompt(`Restore ${dep.name} — how many replicas?`, '1');
+                                        if (n && !isNaN(parseInt(n))) {
+                                          handleScaleDeployment(cluster.name, ns, dep.name, parseInt(n), regionData.region, cluster.accountId);
+                                        }
+                                      }}
+                                    >
+                                      {actionLoading[`${cluster.name}-${ns}-${dep.name}`] ? 'Scaling...' : 'Restore'}
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
                           ))}
-                        </td>
-                        <td><span className="cost-indicator active-cost">active cost</span></td>
-                        <td>—</td>
-                      </tr>
-                    ))}
+                        </React.Fragment>
+                      ));
+                    })()}
                     {expandedClusters[cluster.name] && cluster.computeType !== 'fargate' && cluster.nodegroups.map((ng) => (
                       <tr key={`${cluster.name}-${ng.name}`} style={{ backgroundColor: '#f9f9f9' }}>
                         <td colSpan="1" style={{ paddingLeft: '40px', fontSize: '13px' }}>

@@ -24,6 +24,8 @@ locals {
     # Compute - Control
     "control-ec2"            = { path = "compute/control-ec2", handler = "index.handler" }
     "control-eks-nodegroup"  = { path = "compute/control-eks-nodegroup", handler = "index.handler" }
+    "list-eks-workloads"     = { path = "compute/list-eks-workloads", handler = "index.handler" }
+    "control-eks-workload"   = { path = "compute/control-eks-workload", handler = "index.handler" }
 
     # Databases - Read
     "list-rds"      = { path = "databases/list-rds", handler = "index.handler" }
