@@ -13,6 +13,7 @@ import LoadBalancerList from './components/Networking/LoadBalancerList';
 import EBSVolumeList from './components/Storage/EBSVolumeList';
 import ScheduleList from './components/Schedules/ScheduleList';
 import CostDashboard from './components/Costs/CostDashboard';
+import AccountReport from './components/Reports/AccountReport';
 import Accounts from './components/Settings/Accounts';
 import Header from './components/Layout/Header';
 import Navigation from './components/Layout/Navigation';
@@ -125,6 +126,14 @@ function App() {
                 element={
                   <PrivateRoute>
                     <CostDashboard />
+                  </PrivateRoute>
+                }
+              />
+              <Route
+                path="/reports"
+                element={
+                  <PrivateRoute>
+                    <AccountReport />
                   </PrivateRoute>
                 }
               />

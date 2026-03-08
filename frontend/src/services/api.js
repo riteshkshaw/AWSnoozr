@@ -114,8 +114,8 @@ const api = {
     apiClient.delete(`/accounts/${accountId}`).then(res => res.data),
   testAccountConnection: (accountId) =>
     apiClient.post(`/accounts/${accountId}/test`).then(res => res.data),
-  aggregateResources: (resourceType = 'all') =>
-    apiClient.get(`/accounts/resources?type=${resourceType}`).then(res => res.data),
+  aggregateResources: (resourceType = 'all', accountId = null) =>
+    apiClient.get(`/accounts/resources?type=${resourceType}${accountId ? `&accountId=${accountId}` : ''}`).then(res => res.data),
 
   // Tags (Tag Filtering)
   getAllTags: () => apiClient.get('/tags').then(res => res.data),

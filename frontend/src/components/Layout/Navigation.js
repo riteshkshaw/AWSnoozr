@@ -61,6 +61,9 @@ const Navigation = () => {
         <NavLink to="/costs" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
           Cost Dashboard
         </NavLink>
+        <NavLink to="/reports" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+          Account Report
+        </NavLink>
       </div>
 
       <div className="nav-section">

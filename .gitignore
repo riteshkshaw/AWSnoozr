@@ -37,3 +37,5 @@ frontend/.env.production
 
 # NPM (exclude root-level user-specific npm configs, but keep frontend/.npmrc)
 /.npmrc
+
+*.md

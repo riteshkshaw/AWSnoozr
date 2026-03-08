@@ -7,10 +7,11 @@
 
 const { DynamoDBClient, ScanCommand } = require('@aws-sdk/client-dynamodb');
 const { STSClient, AssumeRoleCommand } = require('@aws-sdk/client-sts');
-const { EC2Client, DescribeInstancesCommand, DescribeRegionsCommand } = require('@aws-sdk/client-ec2');
+const { EC2Client, DescribeInstancesCommand, DescribeRegionsCommand, DescribeNatGatewaysCommand, DescribeVolumesCommand, DescribeAddressesCommand } = require('@aws-sdk/client-ec2');
 const { RDSClient, DescribeDBInstancesCommand, DescribeDBClustersCommand } = require('@aws-sdk/client-rds');
 const { RedshiftClient, DescribeClustersCommand } = require('@aws-sdk/client-redshift');
 const { EKSClient, ListClustersCommand, DescribeClusterCommand, ListNodegroupsCommand } = require('@aws-sdk/client-eks');
+const { ElasticLoadBalancingV2Client, DescribeLoadBalancersCommand } = require('@aws-sdk/client-elastic-load-balancing-v2');
 const { unmarshall } = require('@aws-sdk/util-dynamodb');
 
 const dynamodb = new DynamoDBClient({});
@@ -167,7 +168,7 @@ async function testConnection(event) {
   const accountId = event.pathParameters.accountId;
 
   // Get account configuration
-  const { GetItemCommand } = require('@aws-sdk/client-dynamodb');
+  const { GetItemCommand, UpdateItemCommand } = require('@aws-sdk/client-dynamodb');
   const { Item } = await dynamodb.send(
     new GetItemCommand({
       TableName: TABLE_NAME,
@@ -232,6 +233,7 @@ async function testConnection(event) {
  */
 async function aggregateAllResources(event) {
   const resourceType = event.queryStringParameters?.type || 'all';
+  const filterAccountId = event.queryStringParameters?.accountId || null;
 
   // Get all enabled accounts
   const { Items } = await dynamodb.send(
@@ -243,7 +245,11 @@ async function aggregateAllResources(event) {
     })
   );
 
-  const accounts = Items.map(item => unmarshall(item));
+  let accounts = Items.map(item => unmarshall(item));
+
+  if (filterAccountId) {
+    accounts = accounts.filter(a => a.accountId === filterAccountId);
+  }
 
   const results = [];
 
@@ -270,6 +276,26 @@ async function aggregateAllResources(event) {
         if (resourceType === 'all' || resourceType === 'eks') {
           const eksResources = await queryEKS(region, credentials, account.accountId);
           results.push(...eksResources);
+        }
+
+        if (resourceType === 'all' || resourceType === 'nat-gateway') {
+          const natResources = await queryNATGateways(region, credentials, account.accountId);
+          results.push(...natResources);
+        }
+
+        if (resourceType === 'all' || resourceType === 'load-balancer') {
+          const lbResources = await queryLoadBalancers(region, credentials, account.accountId);
+          results.push(...lbResources);
+        }
+
+        if (resourceType === 'all' || resourceType === 'ebs') {
+          const ebsResources = await queryEBSVolumes(region, credentials, account.accountId);
+          results.push(...ebsResources);
+        }
+
+        if (resourceType === 'all' || resourceType === 'elastic-ip') {
+          const eipResources = await queryElasticIPs(region, credentials, account.accountId);
+          results.push(...eipResources);
         }
       }
     } catch (error) {
@@ -435,6 +461,98 @@ async function queryEKS(region, credentials, accountId) {
     return results;
   } catch (error) {
     console.error(`Error querying EKS in ${region}:`, error);
+    return [];
+  }
+}
+
+/**
+ * Query NAT Gateways in account/region
+ */
+async function queryNATGateways(region, credentials, accountId) {
+  const ec2 = new EC2Client({ region, credentials });
+
+  try {
+    const { NatGateways } = await ec2.send(new DescribeNatGatewaysCommand({}));
+
+    return NatGateways.map(n => ({
+      accountId,
+      region,
+      resourceType: 'nat-gateway',
+      resourceId: n.NatGatewayId,
+      name: n.Tags?.find(t => t.Key === 'Name')?.Value || n.NatGatewayId,
+      state: n.State
+    }));
+  } catch (error) {
+    console.error(`Error querying NAT Gateways in ${region}:`, error);
+    return [];
+  }
+}
+
+/**
+ * Query Load Balancers in account/region
+ */
+async function queryLoadBalancers(region, credentials, accountId) {
+  const elb = new ElasticLoadBalancingV2Client({ region, credentials });
+
+  try {
+    const { LoadBalancers } = await elb.send(new DescribeLoadBalancersCommand({}));
+
+    return LoadBalancers.map(lb => ({
+      accountId,
+      region,
+      resourceType: 'load-balancer',
+      resourceId: lb.LoadBalancerArn,
+      name: lb.LoadBalancerName,
+      state: lb.State?.Code || 'unknown'
+    }));
+  } catch (error) {
+    console.error(`Error querying Load Balancers in ${region}:`, error);
+    return [];
+  }
+}
+
+/**
+ * Query EBS Volumes in account/region
+ */
+async function queryEBSVolumes(region, credentials, accountId) {
+  const ec2 = new EC2Client({ region, credentials });
+
+  try {
+    const { Volumes } = await ec2.send(new DescribeVolumesCommand({}));
+
+    return Volumes.map(v => ({
+      accountId,
+      region,
+      resourceType: 'ebs',
+      resourceId: v.VolumeId,
+      name: v.Tags?.find(t => t.Key === 'Name')?.Value || v.VolumeId,
+      state: v.State
+    }));
+  } catch (error) {
+    console.error(`Error querying EBS Volumes in ${region}:`, error);
+    return [];
+  }
+}
+
+/**
+ * Query Elastic IPs in account/region
+ */
+async function queryElasticIPs(region, credentials, accountId) {
+  const ec2 = new EC2Client({ region, credentials });
+
+  try {
+    const { Addresses } = await ec2.send(new DescribeAddressesCommand({}));
+
+    return Addresses.map(a => ({
+      accountId,
+      region,
+      resourceType: 'elastic-ip',
+      resourceId: a.AllocationId || a.PublicIp,
+      name: a.Tags?.find(t => t.Key === 'Name')?.Value || a.PublicIp,
+      state: a.AssociationId ? 'associated' : 'unassociated'
+    }));
+  } catch (error) {
+    console.error(`Error querying Elastic IPs in ${region}:`, error);
     return [];
   }
 }
