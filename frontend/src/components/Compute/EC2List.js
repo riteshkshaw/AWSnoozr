@@ -11,6 +11,7 @@ function transformAggregatedEC2(resources) {
     byRegion[r.region].count++;
     byRegion[r.region].instances.push({
       id: r.resourceId,
+      accountId: r.accountId,
       type: r.instanceType || '-',
       state: r.state,
       costIndicator: r.state === 'running' ? 'active-cost' : 'no-cost',
@@ -24,7 +25,7 @@ function transformAggregatedEC2(resources) {
 
 const EC2List = () => {
   const [searchParams] = useSearchParams();
-  const accountId = searchParams.get('accountId');
+  const accountId = searchParams.get('accountId') || sessionStorage.getItem('lastAccountId');
   const [data, setData] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
@@ -57,11 +58,18 @@ const EC2List = () => {
     }
   };
 
-  const handleAction = async (instanceId, action, region) => {
+  const handleAction = async (instanceId, action, region, resourceAccountId) => {
     const key = `${instanceId}-${action}`;
     setActionLoading({ ...actionLoading, [key]: true });
     setError('');
     setSuccessMessage('');
+
+    const effectiveAccountId = resourceAccountId || accountId;
+    if (!effectiveAccountId) {
+      setError('Cannot determine account for this resource. Navigate here via Account Report.');
+      setActionLoading({ ...actionLoading, [key]: false });
+      return;
+    }
 
     const confirmMessage = action === 'stop'
       ? `Are you sure you want to stop instance ${instanceId}?`
@@ -74,9 +82,9 @@ const EC2List = () => {
 
     try {
       if (action === 'stop') {
-        await api.stopEC2(instanceId, region);
+        await api.stopEC2(instanceId, region, effectiveAccountId);
       } else {
-        await api.startEC2(instanceId, region);
+        await api.startEC2(instanceId, region, effectiveAccountId);
       }
 
       setSuccessMessage(`Instance ${action} operation initiated successfully`);
@@ -173,7 +181,7 @@ const EC2List = () => {
                       <div className="action-buttons">
                         {instance.state === 'running' && (
                           <button
-                            onClick={() => handleAction(instance.id, 'stop', regionData.region)}
+                            onClick={() => handleAction(instance.id, 'stop', regionData.region, instance.accountId)}
                             disabled={actionLoading[`${instance.id}-stop`]}
                             className="button button-danger button-sm"
                           >
@@ -182,7 +190,7 @@ const EC2List = () => {
                         )}
                         {instance.state === 'stopped' && (
                           <button
-                            onClick={() => handleAction(instance.id, 'start', regionData.region)}
+                            onClick={() => handleAction(instance.id, 'start', regionData.region, instance.accountId)}
                             disabled={actionLoading[`${instance.id}-start`]}
                             className="button button-success button-sm"
                           >

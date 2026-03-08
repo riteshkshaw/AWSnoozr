@@ -100,6 +100,9 @@ const AccountReport = () => {
 
   const handleSync = async () => {
     setIsLoading(true);
+    if (selectedAccountId) {
+      sessionStorage.setItem('lastAccountId', selectedAccountId);
+    }
     try {
       const data = await api.aggregateResources('all', selectedAccountId || null);
       setResources(data.resources || []);

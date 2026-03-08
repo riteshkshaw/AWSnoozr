@@ -11,6 +11,7 @@ function transformAggregatedRDS(resources) {
     if (r.resourceType === 'rds-cluster') {
       byRegion[r.region].clusters.push({
         id: r.resourceId,
+        accountId: r.accountId,
         engine: r.engine || '-',
         engineVersion: '',
         state: r.state,
@@ -22,6 +23,7 @@ function transformAggregatedRDS(resources) {
     } else {
       byRegion[r.region].instances.push({
         id: r.resourceId,
+        accountId: r.accountId,
         engine: r.engine || '-',
         engineVersion: '',
         instanceClass: r.instanceClass || '-',
@@ -39,7 +41,7 @@ function transformAggregatedRDS(resources) {
 
 const RDSList = () => {
   const [searchParams] = useSearchParams();
-  const accountId = searchParams.get('accountId');
+  const accountId = searchParams.get('accountId') || sessionStorage.getItem('lastAccountId');
   const [data, setData] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
@@ -70,11 +72,18 @@ const RDSList = () => {
     }
   };
 
-  const handleAction = async (resourceId, action, resourceType, region) => {
+  const handleAction = async (resourceId, action, resourceType, region, resourceAccountId) => {
     const key = `${resourceId}-${action}`;
     setActionLoading({ ...actionLoading, [key]: true });
     setError('');
     setSuccessMessage('');
+
+    const effectiveAccountId = resourceAccountId || accountId;
+    if (!effectiveAccountId) {
+      setError('Cannot determine account for this resource. Navigate here via Account Report.');
+      setActionLoading({ ...actionLoading, [key]: false });
+      return;
+    }
 
     const confirmMessage = action === 'stop'
       ? `Are you sure you want to stop RDS ${resourceType} ${resourceId}?`
@@ -87,9 +96,9 @@ const RDSList = () => {
 
     try {
       if (action === 'stop') {
-        await api.stopRDS(resourceId, resourceType, region);
+        await api.stopRDS(resourceId, resourceType, region, effectiveAccountId);
       } else {
-        await api.startRDS(resourceId, resourceType, region);
+        await api.startRDS(resourceId, resourceType, region, effectiveAccountId);
       }
 
       setSuccessMessage(`RDS ${resourceType} ${action} operation initiated successfully`);
@@ -171,7 +180,7 @@ const RDSList = () => {
                           <div className="action-buttons">
                             {instance.canStop && instance.state === 'available' && (
                               <button
-                                onClick={() => handleAction(instance.id, 'stop', 'instance', regionData.region)}
+                                onClick={() => handleAction(instance.id, 'stop', 'instance', regionData.region, instance.accountId)}
                                 disabled={actionLoading[`${instance.id}-stop`]}
                                 className="button button-danger button-sm"
                               >
@@ -180,7 +189,7 @@ const RDSList = () => {
                             )}
                             {instance.state === 'stopped' && (
                               <button
-                                onClick={() => handleAction(instance.id, 'start', 'instance', regionData.region)}
+                                onClick={() => handleAction(instance.id, 'start', 'instance', regionData.region, instance.accountId)}
                                 disabled={actionLoading[`${instance.id}-start`]}
                                 className="button button-success button-sm"
                               >
@@ -237,7 +246,7 @@ const RDSList = () => {
                           <div className="action-buttons">
                             {cluster.canStop && cluster.state === 'available' && (
                               <button
-                                onClick={() => handleAction(cluster.id, 'stop', 'cluster', regionData.region)}
+                                onClick={() => handleAction(cluster.id, 'stop', 'cluster', regionData.region, cluster.accountId)}
                                 disabled={actionLoading[`${cluster.id}-stop`]}
                                 className="button button-danger button-sm"
                               >
@@ -246,7 +255,7 @@ const RDSList = () => {
                             )}
                             {cluster.state === 'stopped' && (
                               <button
-                                onClick={() => handleAction(cluster.id, 'start', 'cluster', regionData.region)}
+                                onClick={() => handleAction(cluster.id, 'start', 'cluster', regionData.region, cluster.accountId)}
                                 disabled={actionLoading[`${cluster.id}-start`]}
                                 className="button button-success button-sm"
                               >

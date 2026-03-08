@@ -327,14 +327,275 @@ resource "aws_api_gateway_integration_response" "options_integration_responses" 
   depends_on = [aws_api_gateway_integration.options_integrations]
 }
 
+# ============================================================
+# Control route path-parameter resources
+# ============================================================
+
+# /compute/ec2/{instanceId}
+resource "aws_api_gateway_resource" "ec2_instance_id" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.child_resources["compute_ec2"].id
+  path_part   = "{instanceId}"
+}
+
+# /compute/ec2/{instanceId}/stop
+resource "aws_api_gateway_resource" "ec2_stop" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.ec2_instance_id.id
+  path_part   = "stop"
+}
+
+# /compute/ec2/{instanceId}/start
+resource "aws_api_gateway_resource" "ec2_start" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.ec2_instance_id.id
+  path_part   = "start"
+}
+
+# /databases/rds/{resourceId}
+resource "aws_api_gateway_resource" "rds_resource_id" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.child_resources["databases_rds"].id
+  path_part   = "{resourceId}"
+}
+
+# /databases/rds/{resourceId}/stop
+resource "aws_api_gateway_resource" "rds_stop" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.rds_resource_id.id
+  path_part   = "stop"
+}
+
+# /databases/rds/{resourceId}/start
+resource "aws_api_gateway_resource" "rds_start" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.rds_resource_id.id
+  path_part   = "start"
+}
+
+# /databases/redshift/{clusterId}
+resource "aws_api_gateway_resource" "redshift_cluster_id" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.child_resources["databases_redshift"].id
+  path_part   = "{clusterId}"
+}
+
+# /databases/redshift/{clusterId}/pause
+resource "aws_api_gateway_resource" "redshift_pause" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.redshift_cluster_id.id
+  path_part   = "pause"
+}
+
+# /databases/redshift/{clusterId}/resume
+resource "aws_api_gateway_resource" "redshift_resume" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.redshift_cluster_id.id
+  path_part   = "resume"
+}
+
+# /compute/eks/{clusterName}
+resource "aws_api_gateway_resource" "eks_cluster_name" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.child_resources["compute_eks"].id
+  path_part   = "{clusterName}"
+}
+
+# /compute/eks/{clusterName}/nodegroup
+resource "aws_api_gateway_resource" "eks_nodegroup" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.eks_cluster_name.id
+  path_part   = "nodegroup"
+}
+
+# /compute/eks/{clusterName}/nodegroup/{nodegroupName}
+resource "aws_api_gateway_resource" "eks_nodegroup_name" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.eks_nodegroup.id
+  path_part   = "{nodegroupName}"
+}
+
+# /compute/eks/{clusterName}/nodegroup/{nodegroupName}/scale
+resource "aws_api_gateway_resource" "eks_scale" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.eks_nodegroup_name.id
+  path_part   = "scale"
+}
+
+# ============================================================
+# Control action endpoints — POST + OPTIONS for each
+# ============================================================
+
+locals {
+  control_actions = {
+    "ec2_stop"       = { resource_id = aws_api_gateway_resource.ec2_stop.id,       lambda = "control-ec2" }
+    "ec2_start"      = { resource_id = aws_api_gateway_resource.ec2_start.id,      lambda = "control-ec2" }
+    "rds_stop"       = { resource_id = aws_api_gateway_resource.rds_stop.id,       lambda = "control-rds" }
+    "rds_start"      = { resource_id = aws_api_gateway_resource.rds_start.id,      lambda = "control-rds" }
+    "redshift_pause" = { resource_id = aws_api_gateway_resource.redshift_pause.id, lambda = "control-redshift" }
+    "redshift_resume"= { resource_id = aws_api_gateway_resource.redshift_resume.id,lambda = "control-redshift" }
+    "eks_scale"      = { resource_id = aws_api_gateway_resource.eks_scale.id,      lambda = "control-eks-nodegroup" }
+  }
+}
+
+# POST methods (Cognito-protected)
+resource "aws_api_gateway_method" "control_post" {
+  for_each = local.control_actions
+
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  resource_id   = each.value.resource_id
+  http_method   = "POST"
+  authorization = "COGNITO_USER_POOLS"
+  authorizer_id = aws_api_gateway_authorizer.cognito.id
+}
+
+# POST Lambda integrations
+resource "aws_api_gateway_integration" "control_post" {
+  for_each = local.control_actions
+
+  rest_api_id             = aws_api_gateway_rest_api.main.id
+  resource_id             = each.value.resource_id
+  http_method             = aws_api_gateway_method.control_post[each.key].http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = var.lambda_function_invoke_arns[each.value.lambda]
+}
+
+# OPTIONS methods (unauthenticated preflight)
+resource "aws_api_gateway_method" "control_options" {
+  for_each = local.control_actions
+
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  resource_id   = each.value.resource_id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+}
+
+# OPTIONS MOCK integrations
+resource "aws_api_gateway_integration" "control_options" {
+  for_each = local.control_actions
+
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = each.value.resource_id
+  http_method = aws_api_gateway_method.control_options[each.key].http_method
+  type        = "MOCK"
+
+  request_templates = {
+    "application/json" = "{\"statusCode\": 200}"
+  }
+}
+
+# OPTIONS method responses
+resource "aws_api_gateway_method_response" "control_options" {
+  for_each = local.control_actions
+
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = each.value.resource_id
+  http_method = aws_api_gateway_method.control_options[each.key].http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+    "method.response.header.Access-Control-Allow-Origin"  = true
+  }
+
+  response_models = {
+    "application/json" = "Empty"
+  }
+}
+
+# OPTIONS integration responses (writes the actual CORS header values)
+resource "aws_api_gateway_integration_response" "control_options" {
+  for_each = local.control_actions
+
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = each.value.resource_id
+  http_method = aws_api_gateway_method.control_options[each.key].http_method
+  status_code = aws_api_gateway_method_response.control_options[each.key].status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+    "method.response.header.Access-Control-Allow-Methods" = "'POST,OPTIONS'"
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+  }
+
+  depends_on = [aws_api_gateway_integration.control_options]
+}
+
+# Lambda invoke permissions for control functions
+# Uses a distinct statement_id prefix "AllowControlInvoke-" to avoid collisions
+# with the "AllowAPIGatewayInvoke-" prefix used for get_methods above.
+resource "aws_lambda_permission" "control_invoke" {
+  for_each = toset(["control-ec2", "control-rds", "control-redshift", "control-eks-nodegroup"])
+
+  statement_id  = "AllowControlInvoke-${each.key}"
+  action        = "lambda:InvokeFunction"
+  function_name = var.lambda_function_names[each.key]
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.main.execution_arn}/*/*"
+}
+
+# ============================================================
+# Gateway Responses — inject CORS headers into all API Gateway
+# generated error responses (4xx / 5xx) so the browser sees
+# the real error instead of a misleading CORS error.
+# ============================================================
+resource "aws_api_gateway_gateway_response" "cors_4xx" {
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  response_type = "DEFAULT_4XX"
+
+  response_parameters = {
+    "gatewayresponse.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+    "gatewayresponse.header.Access-Control-Allow-Methods" = "'GET,POST,PUT,DELETE,OPTIONS'"
+    "gatewayresponse.header.Access-Control-Allow-Origin"  = "'*'"
+  }
+}
+
+resource "aws_api_gateway_gateway_response" "cors_5xx" {
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  response_type = "DEFAULT_5XX"
+
+  response_parameters = {
+    "gatewayresponse.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+    "gatewayresponse.header.Access-Control-Allow-Methods" = "'GET,POST,PUT,DELETE,OPTIONS'"
+    "gatewayresponse.header.Access-Control-Allow-Origin"  = "'*'"
+  }
+}
+
 # Deployment
+# triggers causes a new deployment snapshot whenever routes/integrations change,
+# ensuring the stage always serves the latest API definition.
 resource "aws_api_gateway_deployment" "main" {
   rest_api_id = aws_api_gateway_rest_api.main.id
 
-  depends_on = [
-    aws_api_gateway_integration.get_integrations,
-    aws_api_gateway_integration.options_integrations
-  ]
+  triggers = {
+    redeployment = sha1(jsonencode([
+      aws_api_gateway_resource.root_resources,
+      aws_api_gateway_resource.child_resources,
+      aws_api_gateway_resource.ec2_instance_id,
+      aws_api_gateway_resource.ec2_stop,
+      aws_api_gateway_resource.ec2_start,
+      aws_api_gateway_resource.rds_resource_id,
+      aws_api_gateway_resource.rds_stop,
+      aws_api_gateway_resource.rds_start,
+      aws_api_gateway_resource.redshift_cluster_id,
+      aws_api_gateway_resource.redshift_pause,
+      aws_api_gateway_resource.redshift_resume,
+      aws_api_gateway_resource.eks_cluster_name,
+      aws_api_gateway_resource.eks_nodegroup,
+      aws_api_gateway_resource.eks_nodegroup_name,
+      aws_api_gateway_resource.eks_scale,
+      aws_api_gateway_method.get_methods,
+      aws_api_gateway_integration.get_integrations,
+      aws_api_gateway_method.options_methods,
+      aws_api_gateway_integration.options_integrations,
+      aws_api_gateway_method.control_post,
+      aws_api_gateway_integration.control_post,
+      aws_api_gateway_method.control_options,
+      aws_api_gateway_integration.control_options,
+    ]))
+  }
 
   lifecycle {
     create_before_destroy = true

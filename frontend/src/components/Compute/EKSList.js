@@ -10,6 +10,7 @@ function transformAggregatedEKS(resources) {
     byRegion[r.region].totalCount++;
     byRegion[r.region].clusters.push({
       name: r.resourceId,
+      accountId: r.accountId,
       version: r.version || '-',
       status: r.state,
       nodegroups: [],
@@ -22,7 +23,7 @@ function transformAggregatedEKS(resources) {
 
 const EKSList = () => {
   const [searchParams] = useSearchParams();
-  const accountId = searchParams.get('accountId');
+  const accountId = searchParams.get('accountId') || sessionStorage.getItem('lastAccountId');
   const [data, setData] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
@@ -61,7 +62,7 @@ const EKSList = () => {
     });
   };
 
-  const handleScaleNodeGroup = async (clusterName, nodegroupName, currentSize, minSize, maxSize, region) => {
+  const handleScaleNodeGroup = async (clusterName, nodegroupName, currentSize, minSize, maxSize, region, resourceAccountId) => {
     const key = `${clusterName}-${nodegroupName}`;
     const desiredSize = prompt(
       `Scale node group "${nodegroupName}" in cluster "${clusterName}"\n\n` +
@@ -82,8 +83,15 @@ const EKSList = () => {
     setError('');
     setSuccessMessage('');
 
+    const effectiveAccountId = resourceAccountId || accountId;
+    if (!effectiveAccountId) {
+      setError('Cannot determine account for this resource. Navigate here via Account Report.');
+      setActionLoading({ ...actionLoading, [key]: false });
+      return;
+    }
+
     try {
-      await api.scaleEKSNodeGroup(clusterName, nodegroupName, newSize, region);
+      await api.scaleEKSNodeGroup(clusterName, nodegroupName, newSize, region, effectiveAccountId);
       setSuccessMessage(`Node group scaling initiated: ${currentSize} → ${newSize} nodes`);
       setTimeout(() => fetchEKSClusters(), 2000);
     } catch (err) {
@@ -197,7 +205,8 @@ const EKSList = () => {
                               ng.desiredSize,
                               ng.minSize,
                               ng.maxSize,
-                              regionData.region
+                              regionData.region,
+                              cluster.accountId
                             )}
                             disabled={actionLoading[`${cluster.name}-${ng.name}`]}
                             className="button button-primary button-sm"

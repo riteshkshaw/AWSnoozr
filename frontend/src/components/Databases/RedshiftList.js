@@ -10,6 +10,7 @@ function transformAggregatedRedshift(resources) {
     byRegion[r.region].totalCount++;
     byRegion[r.region].clusters.push({
       id: r.resourceId,
+      accountId: r.accountId,
       nodeType: r.nodeType || '-',
       numberOfNodes: r.numberOfNodes || '-',
       status: r.state,
@@ -25,7 +26,7 @@ function transformAggregatedRedshift(resources) {
 
 const RedshiftList = () => {
   const [searchParams] = useSearchParams();
-  const accountId = searchParams.get('accountId');
+  const accountId = searchParams.get('accountId') || sessionStorage.getItem('lastAccountId');
   const [data, setData] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
@@ -56,11 +57,18 @@ const RedshiftList = () => {
     }
   };
 
-  const handleAction = async (clusterId, action, region) => {
+  const handleAction = async (clusterId, action, region, resourceAccountId) => {
     const key = `${clusterId}-${action}`;
     setActionLoading({ ...actionLoading, [key]: true });
     setError('');
     setSuccessMessage('');
+
+    const effectiveAccountId = resourceAccountId || accountId;
+    if (!effectiveAccountId) {
+      setError('Cannot determine account for this resource. Navigate here via Account Report.');
+      setActionLoading({ ...actionLoading, [key]: false });
+      return;
+    }
 
     const confirmMessage = action === 'pause'
       ? `Are you sure you want to pause Redshift cluster ${clusterId}? This will stop compute charges but storage charges continue.`
@@ -73,9 +81,9 @@ const RedshiftList = () => {
 
     try {
       if (action === 'pause') {
-        await api.pauseRedshift(clusterId, region);
+        await api.pauseRedshift(clusterId, region, effectiveAccountId);
       } else {
-        await api.resumeRedshift(clusterId, region);
+        await api.resumeRedshift(clusterId, region, effectiveAccountId);
       }
 
       setSuccessMessage(`Redshift cluster ${action} operation initiated successfully`);
@@ -152,7 +160,7 @@ const RedshiftList = () => {
                       <div className="action-buttons">
                         {cluster.canPause && cluster.status === 'available' && (
                           <button
-                            onClick={() => handleAction(cluster.id, 'pause', regionData.region)}
+                            onClick={() => handleAction(cluster.id, 'pause', regionData.region, cluster.accountId)}
                             disabled={actionLoading[`${cluster.id}-pause`]}
                             className="button button-danger button-sm"
                           >
@@ -161,7 +169,7 @@ const RedshiftList = () => {
                         )}
                         {cluster.canResume && cluster.status === 'paused' && (
                           <button
-                            onClick={() => handleAction(cluster.id, 'resume', regionData.region)}
+                            onClick={() => handleAction(cluster.id, 'resume', regionData.region, cluster.accountId)}
                             disabled={actionLoading[`${cluster.id}-resume`]}
                             className="button button-success button-sm"
                           >

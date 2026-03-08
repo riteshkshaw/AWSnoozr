@@ -1,5 +1,33 @@
 const { RedshiftClient, DescribeClustersCommand, PauseClusterCommand, ResumeClusterCommand } = require('@aws-sdk/client-redshift');
 const { SNSClient, PublishCommand } = require('@aws-sdk/client-sns');
+const { DynamoDBClient, GetItemCommand } = require('@aws-sdk/client-dynamodb');
+const { STSClient, AssumeRoleCommand } = require('@aws-sdk/client-sts');
+const { unmarshall } = require('@aws-sdk/util-dynamodb');
+
+const dynamodb = new DynamoDBClient({});
+const sts = new STSClient({});
+const TABLE_NAME = process.env.ACCOUNTS_TABLE_NAME || 'awsnoozr-prod-accounts';
+
+async function getCredentialsForAccount(accountId) {
+  const { Item } = await dynamodb.send(
+    new GetItemCommand({ TableName: TABLE_NAME, Key: { accountId: { S: accountId } } })
+  );
+  if (!Item) throw new Error(`Account ${accountId} not found`);
+  const account = unmarshall(Item);
+  const { Credentials } = await sts.send(
+    new AssumeRoleCommand({
+      RoleArn: account.roleArn,
+      RoleSessionName: 'AWSnoozrControlSession',
+      ExternalId: account.externalId,
+      DurationSeconds: 900
+    })
+  );
+  return {
+    accessKeyId: Credentials.AccessKeyId,
+    secretAccessKey: Credentials.SecretAccessKey,
+    sessionToken: Credentials.SessionToken
+  };
+}
 
 async function sendNotification({ action, resourceType, resourceId, region, user, timestamp, result, error = null }) {
   if (!process.env.SNS_TOPIC_ARN) {
@@ -43,9 +71,10 @@ exports.handler = async (event) => {
   const body = JSON.parse(event.body || '{}');
   const { action } = body; // "pause" or "resume"
   const region = event.queryStringParameters?.region || 'us-east-1';
+  const accountId = event.queryStringParameters?.accountId || null;
   const userEmail = event.requestContext?.authorizer?.claims?.email || 'unknown';
 
-  console.log(`Control Redshift request: ${action} ${clusterId} in ${region} by ${userEmail}`);
+  console.log(`Control Redshift request: ${action} ${clusterId} in ${region} account=${accountId || 'primary'} by ${userEmail}`);
 
   if (!clusterId || !action) {
     return {
@@ -75,7 +104,24 @@ exports.handler = async (event) => {
     };
   }
 
-  const redshift = new RedshiftClient({ region });
+  if (!accountId) {
+    return {
+      statusCode: 400,
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+      body: JSON.stringify({ error: 'Missing accountId', message: 'accountId query parameter is required' })
+    };
+  }
+  let credentials;
+  try {
+    credentials = await getCredentialsForAccount(accountId);
+  } catch (err) {
+    return {
+      statusCode: 400,
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+      body: JSON.stringify({ error: 'Account lookup failed', message: err.message })
+    };
+  }
+  const redshift = new RedshiftClient({ region, credentials });
 
   try {
     // Validate cluster exists and get current state

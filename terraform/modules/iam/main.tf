@@ -238,7 +238,11 @@ resource "aws_iam_role_policy" "resource_management" {
         Action = [
           "sts:AssumeRole"
         ]
-        Resource = "arn:aws:iam::*:role/AWSnoozrCrossAccountRole"
+        Resource = [
+                      "arn:aws:iam::*:role/AWSnoozrCrossAccountRole",
+                      "arn:aws:iam::*:role/awsnoozr-prod-cross-account",
+                      "arn:aws:iam::*:role/awsnoozr-prod-control-actions",
+                    ]
       },
       # SNS for notifications
       {

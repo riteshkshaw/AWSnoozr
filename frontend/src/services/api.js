@@ -49,13 +49,13 @@ const api = {
   listEKS: () => apiClient.get('/compute/eks'),
 
   // Compute - Control
-  stopEC2: (instanceId, region) =>
-    apiClient.post(`/compute/ec2/${instanceId}/stop?region=${region}`, { action: 'stop' }),
-  startEC2: (instanceId, region) =>
-    apiClient.post(`/compute/ec2/${instanceId}/start?region=${region}`, { action: 'start' }),
-  scaleEKSNodeGroup: (cluster, nodegroupName, desiredSize, region) =>
+  stopEC2: (instanceId, region, accountId) =>
+    apiClient.post(`/compute/ec2/${instanceId}/stop?region=${region}&accountId=${accountId}`, { action: 'stop' }),
+  startEC2: (instanceId, region, accountId) =>
+    apiClient.post(`/compute/ec2/${instanceId}/start?region=${region}&accountId=${accountId}`, { action: 'start' }),
+  scaleEKSNodeGroup: (cluster, nodegroupName, desiredSize, region, accountId) =>
     apiClient.post(
-      `/compute/eks/${cluster}/nodegroup/${nodegroupName}/scale?region=${region}`,
+      `/compute/eks/${cluster}/nodegroup/${nodegroupName}/scale?region=${region}&accountId=${accountId}`,
       { desiredSize }
     ),
 
@@ -64,22 +64,22 @@ const api = {
   listRedshift: () => apiClient.get('/databases/redshift'),
 
   // Databases - Control
-  stopRDS: (resourceId, resourceType, region) =>
-    apiClient.post(`/databases/rds/${resourceId}/stop?region=${region}`, {
+  stopRDS: (resourceId, resourceType, region, accountId) =>
+    apiClient.post(`/databases/rds/${resourceId}/stop?region=${region}&accountId=${accountId}`, {
       action: 'stop',
       resourceType
     }),
-  startRDS: (resourceId, resourceType, region) =>
-    apiClient.post(`/databases/rds/${resourceId}/start?region=${region}`, {
+  startRDS: (resourceId, resourceType, region, accountId) =>
+    apiClient.post(`/databases/rds/${resourceId}/start?region=${region}&accountId=${accountId}`, {
       action: 'start',
       resourceType
     }),
-  pauseRedshift: (clusterId, region) =>
-    apiClient.post(`/databases/redshift/${clusterId}/pause?region=${region}`, {
+  pauseRedshift: (clusterId, region, accountId) =>
+    apiClient.post(`/databases/redshift/${clusterId}/pause?region=${region}&accountId=${accountId}`, {
       action: 'pause'
     }),
-  resumeRedshift: (clusterId, region) =>
-    apiClient.post(`/databases/redshift/${clusterId}/resume?region=${region}`, {
+  resumeRedshift: (clusterId, region, accountId) =>
+    apiClient.post(`/databases/redshift/${clusterId}/resume?region=${region}&accountId=${accountId}`, {
       action: 'resume'
     }),
 
