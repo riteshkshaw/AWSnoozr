@@ -32,4 +32,8 @@ Thumbs.db
 *.log
 npm-debug.log*
 
-*.mdfrontend/.env.production
+# Environment files
+frontend/.env.production
+
+# NPM (exclude root-level user-specific npm configs, but keep frontend/.npmrc)
+/.npmrc
