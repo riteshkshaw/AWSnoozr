@@ -35,10 +35,6 @@ resource "aws_sns_platform_application" "apns" {
   name                = "${var.project_name}-${var.environment}-apns"
   platform            = "APNS"
   platform_credential = var.apns_certificate
-
-  tags = {
-    Name = "${var.project_name}-${var.environment}-apns"
-  }
 }
 
 resource "aws_sns_platform_application" "fcm" {
@@ -47,10 +43,6 @@ resource "aws_sns_platform_application" "fcm" {
   name                = "${var.project_name}-${var.environment}-fcm"
   platform            = "GCM"
   platform_credential = var.fcm_api_key
-
-  tags = {
-    Name = "${var.project_name}-${var.environment}-fcm"
-  }
 }
 
 output "resource_notifications_topic_arn" {

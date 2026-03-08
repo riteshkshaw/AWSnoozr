@@ -81,7 +81,7 @@ resource "aws_cognito_user_pool_client" "web" {
 }
 
 resource "aws_cognito_user_pool_domain" "main" {
-  domain       = "${var.project_name}-${var.environment}-auth"
+  domain       = "noozr-${var.environment}-auth"
   user_pool_id = aws_cognito_user_pool.main.id
 }
 

@@ -1,3 +1,30 @@
+# IAM role for API Gateway to write CloudWatch Logs
+resource "aws_iam_role" "api_gateway_cloudwatch" {
+  name = "${var.project_name}-${var.environment}-api-gateway-cloudwatch"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "apigateway.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "api_gateway_cloudwatch" {
+  role       = aws_iam_role.api_gateway_cloudwatch.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
+}
+
+resource "aws_api_gateway_account" "main" {
+  cloudwatch_role_arn = aws_iam_role.api_gateway_cloudwatch.arn
+}
+
 resource "aws_api_gateway_rest_api" "main" {
   name        = "${var.project_name}-${var.environment}-api"
   description = "AWSnoozr API for AWS resource management"
@@ -9,6 +36,8 @@ resource "aws_api_gateway_rest_api" "main" {
   tags = {
     Name = "${var.project_name}-${var.environment}-api"
   }
+
+  depends_on = [aws_api_gateway_account.main]
 }
 
 # Cognito Authorizer
@@ -22,39 +51,30 @@ resource "aws_api_gateway_authorizer" "cognito" {
 
 # Resources and methods configuration
 locals {
-  # Define API resources and their Lambda function mappings
-  api_resources = {
-    # Compute endpoints
-    "compute"     = { parent = "root" }
-    "compute_ec2" = { parent = "compute", path_part = "ec2" }
-    "compute_eks" = { parent = "compute", path_part = "eks" }
+  # Define root-level API resources
+  root_resources = {
+    "compute"   = {}
+    "databases" = {}
+    "networking" = {}
+    "storage"   = {}
+    "schedules" = {}
+    "costs"     = {}
+    "accounts"  = {}
+  }
 
-    # Databases endpoints
-    "databases"          = { parent = "root" }
-    "databases_rds"      = { parent = "databases", path_part = "rds" }
-    "databases_redshift" = { parent = "databases", path_part = "redshift" }
-
-    # Networking endpoints
-    "networking"              = { parent = "root" }
-    "networking_nat"          = { parent = "networking", path_part = "nat-gateways" }
-    "networking_eips"         = { parent = "networking", path_part = "elastic-ips" }
+  # Define child API resources
+  child_resources = {
+    "compute_ec2"              = { parent = "compute", path_part = "ec2" }
+    "compute_eks"              = { parent = "compute", path_part = "eks" }
+    "databases_rds"            = { parent = "databases", path_part = "rds" }
+    "databases_redshift"       = { parent = "databases", path_part = "redshift" }
+    "networking_nat"           = { parent = "networking", path_part = "nat-gateways" }
+    "networking_eips"          = { parent = "networking", path_part = "elastic-ips" }
     "networking_loadbalancers" = { parent = "networking", path_part = "load-balancers" }
-
-    # Storage endpoints
-    "storage"     = { parent = "root" }
-    "storage_ebs" = { parent = "storage", path_part = "ebs" }
-
-    # Schedules endpoints
-    "schedules" = { parent = "root" }
-
-    # Costs endpoints
-    "costs"          = { parent = "root" }
-    "costs_summary"  = { parent = "costs", path_part = "summary" }
-    "costs_trend"    = { parent = "costs", path_part = "trend" }
-
-    # Accounts endpoints (multi-account support)
-    "accounts"           = { parent = "root" }
-    "accounts_resources" = { parent = "accounts", path_part = "resources" }
+    "storage_ebs"              = { parent = "storage", path_part = "ebs" }
+    "costs_summary"            = { parent = "costs", path_part = "summary" }
+    "costs_trend"              = { parent = "costs", path_part = "trend" }
+    "accounts_resources"       = { parent = "accounts", path_part = "resources" }
   }
 
   # Define GET methods for read operations
@@ -82,25 +102,32 @@ locals {
   }
 }
 
-# Create API Gateway resources
-resource "aws_api_gateway_resource" "resources" {
-  for_each = local.api_resources
+# Create root-level API Gateway resources
+resource "aws_api_gateway_resource" "root_resources" {
+  for_each = local.root_resources
 
   rest_api_id = aws_api_gateway_rest_api.main.id
-  parent_id = each.value.parent == "root" ? aws_api_gateway_rest_api.main.root_resource_id : (
-    contains(keys(local.api_resources), each.value.parent) ?
-    aws_api_gateway_resource.resources[each.value.parent].id :
-    aws_api_gateway_rest_api.main.root_resource_id
-  )
-  path_part = lookup(each.value, "path_part", each.key)
+  parent_id   = aws_api_gateway_rest_api.main.root_resource_id
+  path_part   = each.key
+}
+
+# Create child API Gateway resources
+resource "aws_api_gateway_resource" "child_resources" {
+  for_each = local.child_resources
+
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.root_resources[each.value.parent].id
+  path_part   = each.value.path_part
+
+  depends_on = [aws_api_gateway_resource.root_resources]
 }
 
 # Create GET methods
 resource "aws_api_gateway_method" "get_methods" {
   for_each = local.get_methods
 
-  rest_api_id   = aws_api_gateway_rest_api.main.id
-  resource_id   = aws_api_gateway_resource.resources[each.key].id
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = contains(keys(local.root_resources), each.key) ? aws_api_gateway_resource.root_resources[each.key].id : aws_api_gateway_resource.child_resources[each.key].id
   http_method   = "GET"
   authorization = "COGNITO_USER_POOLS"
   authorizer_id = aws_api_gateway_authorizer.cognito.id
@@ -114,8 +141,8 @@ resource "aws_api_gateway_method" "get_methods" {
 resource "aws_api_gateway_integration" "get_integrations" {
   for_each = local.get_methods
 
-  rest_api_id             = aws_api_gateway_rest_api.main.id
-  resource_id             = aws_api_gateway_resource.resources[each.key].id
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = contains(keys(local.root_resources), each.key) ? aws_api_gateway_resource.root_resources[each.key].id : aws_api_gateway_resource.child_resources[each.key].id
   http_method             = aws_api_gateway_method.get_methods[each.key].http_method
   integration_http_method = "POST"
   type                    = "AWS_PROXY"
@@ -136,7 +163,7 @@ resource "aws_lambda_permission" "api_gateway_invoke" {
 # Schedule management methods (POST, PUT, DELETE)
 resource "aws_api_gateway_method" "schedule_post" {
   rest_api_id   = aws_api_gateway_rest_api.main.id
-  resource_id   = aws_api_gateway_resource.resources["schedules"].id
+  resource_id   = aws_api_gateway_resource.root_resources["schedules"].id
   http_method   = "POST"
   authorization = "COGNITO_USER_POOLS"
   authorizer_id = aws_api_gateway_authorizer.cognito.id
@@ -144,7 +171,7 @@ resource "aws_api_gateway_method" "schedule_post" {
 
 resource "aws_api_gateway_integration" "schedule_post" {
   rest_api_id             = aws_api_gateway_rest_api.main.id
-  resource_id             = aws_api_gateway_resource.resources["schedules"].id
+  resource_id             = aws_api_gateway_resource.root_resources["schedules"].id
   http_method             = aws_api_gateway_method.schedule_post.http_method
   integration_http_method = "POST"
   type                    = "AWS_PROXY"
@@ -153,7 +180,7 @@ resource "aws_api_gateway_integration" "schedule_post" {
 
 resource "aws_api_gateway_method" "schedule_put" {
   rest_api_id   = aws_api_gateway_rest_api.main.id
-  resource_id   = aws_api_gateway_resource.resources["schedules"].id
+  resource_id   = aws_api_gateway_resource.root_resources["schedules"].id
   http_method   = "PUT"
   authorization = "COGNITO_USER_POOLS"
   authorizer_id = aws_api_gateway_authorizer.cognito.id
@@ -161,7 +188,7 @@ resource "aws_api_gateway_method" "schedule_put" {
 
 resource "aws_api_gateway_integration" "schedule_put" {
   rest_api_id             = aws_api_gateway_rest_api.main.id
-  resource_id             = aws_api_gateway_resource.resources["schedules"].id
+  resource_id             = aws_api_gateway_resource.root_resources["schedules"].id
   http_method             = aws_api_gateway_method.schedule_put.http_method
   integration_http_method = "POST"
   type                    = "AWS_PROXY"
@@ -170,7 +197,7 @@ resource "aws_api_gateway_integration" "schedule_put" {
 
 resource "aws_api_gateway_method" "schedule_delete" {
   rest_api_id   = aws_api_gateway_rest_api.main.id
-  resource_id   = aws_api_gateway_resource.resources["schedules"].id
+  resource_id   = aws_api_gateway_resource.root_resources["schedules"].id
   http_method   = "DELETE"
   authorization = "COGNITO_USER_POOLS"
   authorizer_id = aws_api_gateway_authorizer.cognito.id
@@ -178,26 +205,19 @@ resource "aws_api_gateway_method" "schedule_delete" {
 
 resource "aws_api_gateway_integration" "schedule_delete" {
   rest_api_id             = aws_api_gateway_rest_api.main.id
-  resource_id             = aws_api_gateway_resource.resources["schedules"].id
+  resource_id             = aws_api_gateway_resource.root_resources["schedules"].id
   http_method             = aws_api_gateway_method.schedule_delete.http_method
   integration_http_method = "POST"
   type                    = "AWS_PROXY"
   uri                     = var.lambda_function_invoke_arns["manage-schedules"]
 }
 
-# Lambda permission for schedule management
-resource "aws_lambda_permission" "schedule_management" {
-  statement_id  = "AllowAPIGatewayInvoke-schedules"
-  action        = "lambda:InvokeFunction"
-  function_name = var.lambda_function_names["manage-schedules"]
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_api_gateway_rest_api.main.execution_arn}/*/*"
-}
+# Lambda permission for schedule management - already covered by api_gateway_invoke loop
 
 # Account management methods (POST, PUT, DELETE)
 resource "aws_api_gateway_method" "account_post" {
   rest_api_id   = aws_api_gateway_rest_api.main.id
-  resource_id   = aws_api_gateway_resource.resources["accounts"].id
+  resource_id   = aws_api_gateway_resource.root_resources["accounts"].id
   http_method   = "POST"
   authorization = "COGNITO_USER_POOLS"
   authorizer_id = aws_api_gateway_authorizer.cognito.id
@@ -205,7 +225,7 @@ resource "aws_api_gateway_method" "account_post" {
 
 resource "aws_api_gateway_integration" "account_post" {
   rest_api_id             = aws_api_gateway_rest_api.main.id
-  resource_id             = aws_api_gateway_resource.resources["accounts"].id
+  resource_id             = aws_api_gateway_resource.root_resources["accounts"].id
   http_method             = aws_api_gateway_method.account_post.http_method
   integration_http_method = "POST"
   type                    = "AWS_PROXY"
@@ -214,7 +234,7 @@ resource "aws_api_gateway_integration" "account_post" {
 
 resource "aws_api_gateway_method" "account_put" {
   rest_api_id   = aws_api_gateway_rest_api.main.id
-  resource_id   = aws_api_gateway_resource.resources["accounts"].id
+  resource_id   = aws_api_gateway_resource.root_resources["accounts"].id
   http_method   = "PUT"
   authorization = "COGNITO_USER_POOLS"
   authorizer_id = aws_api_gateway_authorizer.cognito.id
@@ -222,7 +242,7 @@ resource "aws_api_gateway_method" "account_put" {
 
 resource "aws_api_gateway_integration" "account_put" {
   rest_api_id             = aws_api_gateway_rest_api.main.id
-  resource_id             = aws_api_gateway_resource.resources["accounts"].id
+  resource_id             = aws_api_gateway_resource.root_resources["accounts"].id
   http_method             = aws_api_gateway_method.account_put.http_method
   integration_http_method = "POST"
   type                    = "AWS_PROXY"
@@ -231,7 +251,7 @@ resource "aws_api_gateway_integration" "account_put" {
 
 resource "aws_api_gateway_method" "account_delete" {
   rest_api_id   = aws_api_gateway_rest_api.main.id
-  resource_id   = aws_api_gateway_resource.resources["accounts"].id
+  resource_id   = aws_api_gateway_resource.root_resources["accounts"].id
   http_method   = "DELETE"
   authorization = "COGNITO_USER_POOLS"
   authorizer_id = aws_api_gateway_authorizer.cognito.id
@@ -239,28 +259,21 @@ resource "aws_api_gateway_method" "account_delete" {
 
 resource "aws_api_gateway_integration" "account_delete" {
   rest_api_id             = aws_api_gateway_rest_api.main.id
-  resource_id             = aws_api_gateway_resource.resources["accounts"].id
+  resource_id             = aws_api_gateway_resource.root_resources["accounts"].id
   http_method             = aws_api_gateway_method.account_delete.http_method
   integration_http_method = "POST"
   type                    = "AWS_PROXY"
   uri                     = var.lambda_function_invoke_arns["multi-account-aggregator"]
 }
 
-# Lambda permission for account management
-resource "aws_lambda_permission" "account_management" {
-  statement_id  = "AllowAPIGatewayInvoke-accounts"
-  action        = "lambda:InvokeFunction"
-  function_name = var.lambda_function_names["multi-account-aggregator"]
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_api_gateway_rest_api.main.execution_arn}/*/*"
-}
+# Lambda permission for account management - already covered by api_gateway_invoke loop
 
 # CORS configuration for OPTIONS method
 resource "aws_api_gateway_method" "options_methods" {
   for_each = local.get_methods
 
-  rest_api_id   = aws_api_gateway_rest_api.main.id
-  resource_id   = aws_api_gateway_resource.resources[each.key].id
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = contains(keys(local.root_resources), each.key) ? aws_api_gateway_resource.root_resources[each.key].id : aws_api_gateway_resource.child_resources[each.key].id
   http_method   = "OPTIONS"
   authorization = "NONE"
 }
@@ -269,7 +282,7 @@ resource "aws_api_gateway_integration" "options_integrations" {
   for_each = local.get_methods
 
   rest_api_id = aws_api_gateway_rest_api.main.id
-  resource_id = aws_api_gateway_resource.resources[each.key].id
+  resource_id = contains(keys(local.root_resources), each.key) ? aws_api_gateway_resource.root_resources[each.key].id : aws_api_gateway_resource.child_resources[each.key].id
   http_method = aws_api_gateway_method.options_methods[each.key].http_method
   type        = "MOCK"
 
@@ -282,7 +295,7 @@ resource "aws_api_gateway_method_response" "options_responses" {
   for_each = local.get_methods
 
   rest_api_id = aws_api_gateway_rest_api.main.id
-  resource_id = aws_api_gateway_resource.resources[each.key].id
+  resource_id = contains(keys(local.root_resources), each.key) ? aws_api_gateway_resource.root_resources[each.key].id : aws_api_gateway_resource.child_resources[each.key].id
   http_method = aws_api_gateway_method.options_methods[each.key].http_method
   status_code = "200"
 
@@ -301,7 +314,7 @@ resource "aws_api_gateway_integration_response" "options_integration_responses" 
   for_each = local.get_methods
 
   rest_api_id = aws_api_gateway_rest_api.main.id
-  resource_id = aws_api_gateway_resource.resources[each.key].id
+  resource_id = contains(keys(local.root_resources), each.key) ? aws_api_gateway_resource.root_resources[each.key].id : aws_api_gateway_resource.child_resources[each.key].id
   http_method = aws_api_gateway_method.options_methods[each.key].http_method
   status_code = aws_api_gateway_method_response.options_responses[each.key].status_code
 

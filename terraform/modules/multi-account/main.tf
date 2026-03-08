@@ -1,21 +1,6 @@
 # Multi-Account Cross-Account IAM Roles Module
 # This module should be deployed in each AWS account you want to monitor
 
-variable "main_account_id" {
-  description = "Main account ID where AWSnoozr is deployed"
-  type        = string
-}
-
-variable "project_name" {
-  description = "Project name"
-  type        = string
-}
-
-variable "environment" {
-  description = "Environment name"
-  type        = string
-}
-
 # Cross-account IAM role that allows main account to assume
 resource "aws_iam_role" "cross_account" {
   name = "${var.project_name}-${var.environment}-cross-account"

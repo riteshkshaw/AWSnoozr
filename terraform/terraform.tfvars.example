@@ -7,7 +7,7 @@ environment  = "prod"
 aws_regions = ["us-east-1", "us-west-2", "eu-west-1"]
 
 # GitHub repository for Amplify hosting
-github_repo = "https://github.com/your-org/awsnoozr-app"
+github_repo = "https://github.com/riteshkshaw/AWSnoozr/"
 
 # GitHub personal access token (with repo permissions)
 # Create at: https://github.com/settings/tokens
