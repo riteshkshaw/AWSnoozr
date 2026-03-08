@@ -464,27 +464,55 @@ async function queryEKS(region, credentials, accountId) {
 
       const totalNodes = nodeGroupDetails.reduce((sum, ng) => sum + ng.desiredSize, 0);
 
-      // Check for Fargate profiles when no managed node groups exist
+      // When no managed node groups, check for Fargate profiles or self-managed nodes
       let fargateProfiles = [];
+      let selfManagedNodeCount = 0;
+      let computeType = nodeGroupDetails.length > 0 ? 'managed' : 'unknown';
+
       if (nodegroups.length === 0) {
+        // Check Fargate profiles
         try {
           const { fargateProfileNames } = await eks.send(
             new ListFargateProfilesCommand({ clusterName })
           );
-          fargateProfiles = await Promise.all(
-            fargateProfileNames.map(async (profileName) => {
-              const { fargateProfile } = await eks.send(
-                new DescribeFargateProfileCommand({ clusterName, fargateProfileName: profileName })
-              );
-              return {
-                name: profileName,
-                status: fargateProfile.status,
-                selectors: fargateProfile.selectors || []
-              };
-            })
-          );
+          if (fargateProfileNames.length > 0) {
+            fargateProfiles = await Promise.all(
+              fargateProfileNames.map(async (profileName) => {
+                const { fargateProfile } = await eks.send(
+                  new DescribeFargateProfileCommand({ clusterName, fargateProfileName: profileName })
+                );
+                return {
+                  name: profileName,
+                  status: fargateProfile.status,
+                  selectors: fargateProfile.selectors || []
+                };
+              })
+            );
+            computeType = 'fargate';
+          }
         } catch (fargateErr) {
           console.error(`Error querying Fargate profiles for ${clusterName}:`, fargateErr);
+        }
+
+        // If still unknown, check for self-managed nodes via EC2 instance tags
+        if (computeType === 'unknown') {
+          try {
+            const ec2 = new EC2Client({ region, credentials });
+            const { Reservations } = await ec2.send(
+              new DescribeInstancesCommand({
+                Filters: [
+                  { Name: `tag:kubernetes.io/cluster/${clusterName}`, Values: ['owned'] },
+                  { Name: 'instance-state-name', Values: ['running', 'pending'] }
+                ]
+              })
+            );
+            selfManagedNodeCount = Reservations.reduce((sum, r) => sum + r.Instances.length, 0);
+            if (selfManagedNodeCount > 0) {
+              computeType = 'self-managed';
+            }
+          } catch (ec2Err) {
+            console.error(`Error querying self-managed nodes for ${clusterName}:`, ec2Err);
+          }
         }
       }
 
@@ -498,9 +526,9 @@ async function queryEKS(region, credentials, accountId) {
         version: cluster.version,
         nodeGroupCount: nodeGroupDetails.length,
         nodeGroups: nodeGroupDetails,
-        totalNodes,
+        totalNodes: computeType === 'self-managed' ? selfManagedNodeCount : totalNodes,
         fargateProfiles,
-        computeType: fargateProfiles.length > 0 ? 'fargate' : (nodeGroupDetails.length > 0 ? 'managed' : 'unknown')
+        computeType
       });
     }
 

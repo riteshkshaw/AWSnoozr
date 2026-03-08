@@ -158,8 +158,14 @@ const EKSList = () => {
                         </span>
                       </td>
                       <td>
-                        <span className={`state-badge ${cluster.computeType === 'fargate' ? 'running' : cluster.computeType === 'managed' ? 'available' : ''}`}>
-                          {cluster.computeType === 'fargate' ? 'Fargate' : cluster.computeType === 'managed' ? 'Managed EC2' : 'Unknown'}
+                        <span className={`state-badge ${
+                          cluster.computeType === 'fargate' ? 'running' :
+                          cluster.computeType === 'managed' ? 'available' :
+                          cluster.computeType === 'self-managed' ? 'available' : ''
+                        }`}>
+                          {cluster.computeType === 'fargate' ? 'Fargate' :
+                           cluster.computeType === 'managed' ? 'Managed EC2' :
+                           cluster.computeType === 'self-managed' ? 'Self-Managed' : 'Unknown'}
                         </span>
                       </td>
                       <td>
@@ -172,6 +178,7 @@ const EKSList = () => {
                           <span style={{ color: '#999', fontSize: '12px' }}>Serverless</span>
                         ) : cluster.totalNodes}
                       </td>
+
                       <td>
                         <span className={`cost-indicator ${cluster.costIndicator}`}>
                           {cluster.costIndicator.replace('-', ' ')}
