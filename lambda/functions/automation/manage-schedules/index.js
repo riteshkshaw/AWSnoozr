@@ -1,4 +1,4 @@
-const { DynamoDBClient, PutItemCommand, GetItemCommand, UpdateItemCommand, DeleteItemCommand, QueryCommand } = require('@aws-sdk/client-dynamodb');
+const { DynamoDBClient, PutItemCommand, GetItemCommand, UpdateItemCommand, DeleteItemCommand, QueryCommand, ScanCommand } = require('@aws-sdk/client-dynamodb');
 const { marshall, unmarshall } = require('@aws-sdk/util-dynamodb');
 const parser = require('cron-parser');
 
@@ -48,14 +48,9 @@ exports.handler = async (event) => {
 };
 
 async function listSchedules(event) {
-  // Query all schedules
+  // Scan all schedules (enabled and disabled) so the UI can show full picture
   const { Items } = await dynamodb.send(
-    new QueryCommand({
-      TableName: TABLE_NAME,
-      IndexName: 'EnabledSchedulesIndex',
-      KeyConditionExpression: 'enabled = :enabled',
-      ExpressionAttributeValues: marshall({ ':enabled': 1 })
-    })
+    new ScanCommand({ TableName: TABLE_NAME })
   );
 
   const schedules = Items ? Items.map(item => unmarshall(item)) : [];
@@ -126,6 +121,7 @@ async function createSchedule(event) {
     resourceType: body.resourceType, // ec2, rds, redshift, eks-nodegroup
     resourceSubType: body.resourceSubType, // instance, cluster (for RDS)
     region: body.region,
+    accountId: body.accountId || null,
     cronExpression: body.cronExpression,
     timezone: body.timezone || 'UTC',
     enabled: 1,

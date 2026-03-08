@@ -1,4 +1,5 @@
-const { DynamoDBClient, ScanCommand, UpdateItemCommand } = require('@aws-sdk/client-dynamodb');
+const { DynamoDBClient, ScanCommand, UpdateItemCommand, GetItemCommand } = require('@aws-sdk/client-dynamodb');
+const { STSClient, AssumeRoleCommand } = require('@aws-sdk/client-sts');
 const { EC2Client, StopInstancesCommand, StartInstancesCommand } = require('@aws-sdk/client-ec2');
 const { RDSClient, StopDBInstanceCommand, StartDBInstanceCommand, StopDBClusterCommand, StartDBClusterCommand } = require('@aws-sdk/client-rds');
 const { RedshiftClient, PauseClusterCommand, ResumeClusterCommand } = require('@aws-sdk/client-redshift');
@@ -6,6 +7,30 @@ const { EKSClient, UpdateNodegroupConfigCommand, DescribeNodegroupCommand } = re
 const { SNSClient, PublishCommand } = require('@aws-sdk/client-sns');
 const { unmarshall } = require('@aws-sdk/util-dynamodb');
 const parser = require('cron-parser');
+
+const ACCOUNTS_TABLE = process.env.ACCOUNTS_TABLE_NAME || 'awsnoozr-prod-accounts';
+
+async function getCredentialsForAccount(dynamodb, accountId) {
+  const { Item } = await dynamodb.send(
+    new GetItemCommand({ TableName: ACCOUNTS_TABLE, Key: { accountId: { S: accountId } } })
+  );
+  if (!Item) throw new Error(`Account ${accountId} not found`);
+  const account = unmarshall(Item);
+  const sts = new STSClient({});
+  const { Credentials } = await sts.send(
+    new AssumeRoleCommand({
+      RoleArn: account.roleArn,
+      RoleSessionName: 'AWSnoozrSchedulerSession',
+      ExternalId: account.externalId,
+      DurationSeconds: 900
+    })
+  );
+  return {
+    accessKeyId: Credentials.AccessKeyId,
+    secretAccessKey: Credentials.SecretAccessKey,
+    sessionToken: Credentials.SessionToken
+  };
+}
 
 async function sendNotification(schedule, result, error = null) {
   if (!process.env.SNS_TOPIC_ARN) {
@@ -63,21 +88,22 @@ This is an automated notification from AWSnoozr scheduled operations.
   }
 }
 
-async function executeSchedule(schedule) {
+async function executeSchedule(schedule, credentials) {
   const { resourceType, region, resourceId, scheduleType, resourceSubType } = schedule;
+  const clientConfig = { region, ...(credentials ? { credentials } : {}) };
 
-  console.log(`Executing ${scheduleType} for ${resourceType} ${resourceId} in ${region}`);
+  console.log(`Executing ${scheduleType} for ${resourceType} ${resourceId} in ${region} (account: ${schedule.accountId || 'primary'})`);
 
   try {
     if (resourceType === 'ec2') {
-      const ec2 = new EC2Client({ region });
+      const ec2 = new EC2Client(clientConfig);
       if (scheduleType === 'stop') {
         await ec2.send(new StopInstancesCommand({ InstanceIds: [resourceId] }));
       } else {
         await ec2.send(new StartInstancesCommand({ InstanceIds: [resourceId] }));
       }
     } else if (resourceType === 'rds') {
-      const rds = new RDSClient({ region });
+      const rds = new RDSClient(clientConfig);
       if (resourceSubType === 'cluster') {
         if (scheduleType === 'stop') {
           await rds.send(new StopDBClusterCommand({ DBClusterIdentifier: resourceId }));
@@ -92,14 +118,14 @@ async function executeSchedule(schedule) {
         }
       }
     } else if (resourceType === 'redshift') {
-      const redshift = new RedshiftClient({ region });
+      const redshift = new RedshiftClient(clientConfig);
       if (scheduleType === 'pause') {
         await redshift.send(new PauseClusterCommand({ ClusterIdentifier: resourceId }));
       } else {
         await redshift.send(new ResumeClusterCommand({ ClusterIdentifier: resourceId }));
       }
     } else if (resourceType === 'eks-nodegroup') {
-      const eks = new EKSClient({ region });
+      const eks = new EKSClient(clientConfig);
       const [clusterName, nodegroupName] = resourceId.split('/');
 
       if (scheduleType === 'scale-down') {
@@ -209,7 +235,10 @@ exports.handler = async (event) => {
           console.log(`Executing schedule for ${schedule.resourceId}`);
 
           try {
-            await executeSchedule(schedule);
+            const credentials = schedule.accountId
+              ? await getCredentialsForAccount(dynamodb, schedule.accountId)
+              : null;
+            await executeSchedule(schedule, credentials);
             executedCount++;
 
             // Send success notification

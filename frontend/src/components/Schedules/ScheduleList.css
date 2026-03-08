@@ -1,0 +1,239 @@
+.schedule-list .page-header {
+  margin-bottom: 20px;
+}
+
+/* Tabs */
+.schedule-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  border-bottom: 2px solid #f0f0f0;
+}
+
+.schedule-tab {
+  background: none;
+  border: none;
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #999;
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+  transition: color 0.15s, border-color 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.schedule-tab:hover {
+  color: #667eea;
+}
+
+.schedule-tab.active {
+  color: #667eea;
+  border-bottom-color: #667eea;
+}
+
+.schedule-count {
+  background: #667eea;
+  color: white;
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-size: 11px;
+}
+
+/* Automation controls */
+.automation-controls {
+  margin-bottom: 20px;
+}
+
+.automation-controls .controls-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+}
+
+.control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  max-width: 380px;
+}
+
+.control-group label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #555;
+}
+
+.account-select {
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  background: white;
+  cursor: pointer;
+}
+
+.account-select:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.hint-text {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: #aaa;
+  font-style: italic;
+}
+
+/* Schedule table */
+.schedule-table td,
+.schedule-table th {
+  vertical-align: middle;
+}
+
+.svc-name {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.action-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  background: #fff3cd;
+  color: #856404;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.time-input {
+  padding: 6px 10px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 13px;
+  width: 100px;
+}
+
+.time-input:disabled {
+  background: #f5f5f5;
+  color: #ccc;
+  cursor: not-allowed;
+}
+
+.days-select,
+.tz-select {
+  padding: 6px 10px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 13px;
+  background: white;
+}
+
+.days-select:disabled,
+.tz-select:disabled {
+  background: #f5f5f5;
+  color: #ccc;
+  cursor: not-allowed;
+}
+
+/* Toggle switch */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  cursor: pointer;
+}
+
+.toggle-switch.toggle-disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: #ccc;
+  border-radius: 24px;
+  transition: background 0.25s;
+}
+
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  top: 3px;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.25s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background: #667eea;
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(20px);
+}
+
+/* Dim rows with no active resources */
+.row-dim td {
+  opacity: 0.45;
+}
+
+/* Automation footer */
+.automation-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.apply-result {
+  font-size: 13px;
+  color: #555;
+}
+
+/* Empty state */
+.empty-hint {
+  text-align: center;
+  padding: 40px 20px;
+  color: #999;
+  font-style: italic;
+  margin: 0;
+}
+
+/* Spinner (reuse from AccountReport) */
+.spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255,255,255,0.4);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
