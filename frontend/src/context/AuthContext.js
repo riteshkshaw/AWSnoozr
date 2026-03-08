@@ -1,5 +1,5 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
-import { signIn as amplifySignIn, signOut as amplifySignOut, getCurrentUser, fetchAuthSession } from 'aws-amplify/auth';
+import { signIn as amplifySignIn, signOut as amplifySignOut, getCurrentUser, fetchAuthSession, confirmSignIn } from 'aws-amplify/auth';
 
 const AuthContext = createContext({
   user: null,
@@ -32,10 +32,24 @@ export const AuthProvider = ({ children }) => {
   const signIn = async (username, password) => {
     try {
       const result = await amplifySignIn({ username, password });
+      if (result.nextStep?.signInStep === 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED') {
+        return result;
+      }
       await checkUser();
       return result;
     } catch (error) {
       console.error('Sign in error:', error);
+      throw error;
+    }
+  };
+
+  const confirmNewPassword = async (newPassword) => {
+    try {
+      const result = await confirmSignIn({ challengeResponse: newPassword });
+      await checkUser();
+      return result;
+    } catch (error) {
+      console.error('Confirm new password error:', error);
       throw error;
     }
   };
@@ -61,7 +75,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, signIn, signOut, getAuthToken }}>
+    <AuthContext.Provider value={{ user, isLoading, signIn, confirmNewPassword, signOut, getAuthToken }}>
       {children}
     </AuthContext.Provider>
   );
