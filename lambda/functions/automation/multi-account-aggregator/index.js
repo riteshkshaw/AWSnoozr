@@ -10,7 +10,7 @@ const { STSClient, AssumeRoleCommand } = require('@aws-sdk/client-sts');
 const { EC2Client, DescribeInstancesCommand, DescribeRegionsCommand, DescribeNatGatewaysCommand, DescribeVolumesCommand, DescribeAddressesCommand } = require('@aws-sdk/client-ec2');
 const { RDSClient, DescribeDBInstancesCommand, DescribeDBClustersCommand } = require('@aws-sdk/client-rds');
 const { RedshiftClient, DescribeClustersCommand } = require('@aws-sdk/client-redshift');
-const { EKSClient, ListClustersCommand, DescribeClusterCommand, ListNodegroupsCommand, DescribeNodegroupCommand } = require('@aws-sdk/client-eks');
+const { EKSClient, ListClustersCommand, DescribeClusterCommand, ListNodegroupsCommand, DescribeNodegroupCommand, ListFargateProfilesCommand, DescribeFargateProfileCommand } = require('@aws-sdk/client-eks');
 const { ElasticLoadBalancingV2Client, DescribeLoadBalancersCommand } = require('@aws-sdk/client-elastic-load-balancing-v2');
 const { unmarshall } = require('@aws-sdk/util-dynamodb');
 
@@ -464,6 +464,30 @@ async function queryEKS(region, credentials, accountId) {
 
       const totalNodes = nodeGroupDetails.reduce((sum, ng) => sum + ng.desiredSize, 0);
 
+      // Check for Fargate profiles when no managed node groups exist
+      let fargateProfiles = [];
+      if (nodegroups.length === 0) {
+        try {
+          const { fargateProfileNames } = await eks.send(
+            new ListFargateProfilesCommand({ clusterName })
+          );
+          fargateProfiles = await Promise.all(
+            fargateProfileNames.map(async (profileName) => {
+              const { fargateProfile } = await eks.send(
+                new DescribeFargateProfileCommand({ clusterName, fargateProfileName: profileName })
+              );
+              return {
+                name: profileName,
+                status: fargateProfile.status,
+                selectors: fargateProfile.selectors || []
+              };
+            })
+          );
+        } catch (fargateErr) {
+          console.error(`Error querying Fargate profiles for ${clusterName}:`, fargateErr);
+        }
+      }
+
       results.push({
         accountId,
         region,
@@ -474,7 +498,9 @@ async function queryEKS(region, credentials, accountId) {
         version: cluster.version,
         nodeGroupCount: nodeGroupDetails.length,
         nodeGroups: nodeGroupDetails,
-        totalNodes
+        totalNodes,
+        fargateProfiles,
+        computeType: fargateProfiles.length > 0 ? 'fargate' : (nodeGroupDetails.length > 0 ? 'managed' : 'unknown')
       });
     }
 

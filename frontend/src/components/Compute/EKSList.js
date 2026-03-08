@@ -15,6 +15,8 @@ function transformAggregatedEKS(resources) {
       status: r.state,
       nodegroups: r.nodeGroups || [],
       totalNodes: r.totalNodes ?? 0,
+      fargateProfiles: r.fargateProfiles || [],
+      computeType: r.computeType || 'unknown',
       costIndicator: r.state === 'ACTIVE' ? 'active-cost' : 'no-cost'
     });
   });
@@ -137,7 +139,8 @@ const EKSList = () => {
                   <th>Cluster Name</th>
                   <th>Version</th>
                   <th>Status</th>
-                  <th>Node Groups</th>
+                  <th>Compute</th>
+                  <th>Node Groups / Profiles</th>
                   <th>Total Nodes</th>
                   <th>Cost Indicator</th>
                   <th>Actions</th>
@@ -154,15 +157,36 @@ const EKSList = () => {
                           {cluster.status}
                         </span>
                       </td>
-                      <td>{cluster.nodegroups.length}</td>
-                      <td>{cluster.totalNodes}</td>
+                      <td>
+                        <span className={`state-badge ${cluster.computeType === 'fargate' ? 'running' : cluster.computeType === 'managed' ? 'available' : ''}`}>
+                          {cluster.computeType === 'fargate' ? 'Fargate' : cluster.computeType === 'managed' ? 'Managed EC2' : 'Unknown'}
+                        </span>
+                      </td>
+                      <td>
+                        {cluster.computeType === 'fargate'
+                          ? cluster.fargateProfiles.length
+                          : cluster.nodegroups.length}
+                      </td>
+                      <td>
+                        {cluster.computeType === 'fargate' ? (
+                          <span style={{ color: '#999', fontSize: '12px' }}>Serverless</span>
+                        ) : cluster.totalNodes}
+                      </td>
                       <td>
                         <span className={`cost-indicator ${cluster.costIndicator}`}>
                           {cluster.costIndicator.replace('-', ' ')}
                         </span>
                       </td>
                       <td>
-                        {cluster.nodegroups.length > 0 && (
+                        {cluster.computeType === 'fargate' && cluster.fargateProfiles.length > 0 && (
+                          <button
+                            onClick={() => toggleCluster(cluster.name)}
+                            className="button button-primary button-sm"
+                          >
+                            {expandedClusters[cluster.name] ? 'Hide' : 'Show'} Profiles
+                          </button>
+                        )}
+                        {cluster.computeType !== 'fargate' && cluster.nodegroups.length > 0 && (
                           <button
                             onClick={() => toggleCluster(cluster.name)}
                             className="button button-primary button-sm"
@@ -172,7 +196,26 @@ const EKSList = () => {
                         )}
                       </td>
                     </tr>
-                    {expandedClusters[cluster.name] && cluster.nodegroups.map((ng) => (
+                    {expandedClusters[cluster.name] && cluster.computeType === 'fargate' && cluster.fargateProfiles.map((fp) => (
+                      <tr key={`${cluster.name}-fp-${fp.name}`} style={{ backgroundColor: '#f9f9f9' }}>
+                        <td colSpan="2" style={{ paddingLeft: '40px', fontSize: '13px' }}>
+                          ↳ {fp.name}
+                        </td>
+                        <td>
+                          <span className={`state-badge ${fp.status?.toLowerCase()}`}>
+                            {fp.status}
+                          </span>
+                        </td>
+                        <td colSpan="2" style={{ fontSize: '12px', color: '#666' }}>
+                          {fp.selectors?.map((s, i) => (
+                            <span key={i}>ns: {s.namespace}{s.labels ? ` (${Object.entries(s.labels).map(([k,v]) => `${k}=${v}`).join(', ')})` : ''} </span>
+                          ))}
+                        </td>
+                        <td><span className="cost-indicator active-cost">active cost</span></td>
+                        <td>—</td>
+                      </tr>
+                    ))}
+                    {expandedClusters[cluster.name] && cluster.computeType !== 'fargate' && cluster.nodegroups.map((ng) => (
                       <tr key={`${cluster.name}-${ng.name}`} style={{ backgroundColor: '#f9f9f9' }}>
                         <td colSpan="1" style={{ paddingLeft: '40px', fontSize: '13px' }}>
                           ↳ {ng.name}
